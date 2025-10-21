@@ -1,132 +1,532 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de Ideas de Robótica</title>
-    <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            background-color: #f0f8ff;
-            color: #333;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro de Incidencias</title>
+  <!-- Enlace a los estilos de Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Enlace a las librerías jsPDF y jsPDF-autoTable para la exportación -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+  <!-- Enlace a los iconos de Lucide React -->
+  <script type="module">
+    import { createElement as r, useState, useMemo, useRef, useEffect, Fragment } from 'https://esm.sh/react@18.2.0';
+    import { createRoot as d } from 'https://esm.sh/react-dom@18.2.0/client';
+    import { PlusCircle, Search, Trash2, FileText, Loader2, XCircle, Edit } from 'https://esm.sh/lucide-react@0.292.0';
+
+    // A continuación se encuentra el código de la aplicación de React
+    const App = () => {
+      // Estado para guardar los datos del formulario actual
+      const [formData, setFormData] = useState({
+        fecha: new Date().toISOString().slice(0, 10), // Fecha actual por defecto
+        nivel: 'PRIMARIA 1A', // Valor por defecto actualizado
+        tipo: 'LIBRO', // Valor por defecto actualizado a 'LIBRO'
+        incidencias: '',
+      });
+    
+      // Estado para guardar todas las entradas de la tabla
+      const [entries, setEntries] = useState([]);
+      
+      // Estado para la barra de búsqueda
+      const [searchQuery, setSearchQuery] = useState('');
+    
+      // Estado para mostrar mensajes de validación
+      const [validationError, setValidationError] = useState('');
+    
+      // Estado para el indicador de carga del PDF
+      const [isExporting, setIsExporting] = useState(false);
+      // Nuevo estado para manejar errores de exportación
+      const [exportError, setExportError] = useState('');
+
+      // Estado para el indicador de carga de la base de datos
+      const [isLoading, setIsLoading] = useState(true);
+
+      // Nuevo estado para controlar el modo de edición
+      const [editingEntryId, setEditingEntryId] = useState(null);
+
+      // Función para formatear el texto: la primera letra de cada oración en mayúscula
+      const formatIncidenciaText = (text) => {
+        // Convierte todo a minúsculas para un formato consistente
+        const lowercased = text.toLowerCase();
+        // Divide el texto por puntos y espacios
+        const sentences = lowercased.split('. ');
+        
+        // Mapea cada oración para capitalizar la primera letra
+        const formattedSentences = sentences.map(sentence => {
+          if (sentence.length > 0) {
+            // Capitaliza la primera letra y concatena el resto de la oración
+            return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+          }
+          return sentence;
+        });
+        
+        // Une las oraciones de nuevo con un punto y espacio
+        return formattedSentences.join('. ');
+      };
+
+
+      // Cargar registros desde el almacenamiento local al inicio
+      useEffect(() => {
+        try {
+          const savedEntries = localStorage.getItem('incidencias_registros');
+          if (savedEntries) {
+            // Ordenamos los registros por fecha en memoria, de más reciente a más antiguo
+            const parsedEntries = JSON.parse(savedEntries);
+            parsedEntries.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+            setEntries(parsedEntries);
+          }
+        } catch (error) {
+          console.error("Error al cargar los datos del almacenamiento local:", error);
+          // Si hay un error, se inicializa con un array vacío
+          setEntries([]);
+        } finally {
+          setIsLoading(false);
         }
-        .container {
-            max-width: 900px;
-            margin: auto;
-            background: #fff;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }, []);
+
+      // Guardar registros en el almacenamiento local cada vez que cambian
+      useEffect(() => {
+        if (entries.length > 0) {
+          localStorage.setItem('incidencias_registros', JSON.stringify(entries));
+        } else if (entries.length === 0 && !isLoading) {
+          // Si el array está vacío y ya se ha cargado, se borra el local storage
+          localStorage.removeItem('incidencias_registros');
         }
-        h1 {
-            color: #0056b3;
-            text-align: center;
-            border-bottom: 3px solid #0056b3;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
+      }, [entries, isLoading]);
+    
+      // Maneja los cambios en los campos del formulario
+      const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData((prevData) => ({ ...prevData, [name]: value }));
+      };
+    
+      // Maneja el envío del formulario para agregar una nueva entrada
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.incidencias) {
+          setValidationError('Por favor, ingresa el campo de incidencias.');
+          return;
         }
-        .category {
-            background-color: #e6f7ff;
-            border: 1px solid #b3e0ff;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 20px;
+        setValidationError(''); // Limpia el error si la entrada es válida
+        
+        // Si estamos en modo de edición, actualizamos el registro
+        if (editingEntryId) {
+          handleUpdate();
+          return;
         }
-        .category h2 {
-            color: #007bb5;
-            margin-top: 0;
+
+        // Formatea el texto de la incidencia antes de guardarlo
+        const formattedIncidencia = formatIncidenciaText(formData.incidencias);
+
+        // Crea un objeto para la nueva entrada con un ID único
+        const newEntry = {
+          id: new Date().getTime().toString(),
+          fecha: formData.fecha,
+          nivel: formData.nivel,
+          tipo: formData.tipo,
+          incidencias: formattedIncidencia,
+        };
+
+        setEntries((prevEntries) => {
+          // Agrega la nueva entrada al array de registros
+          const updatedEntries = [...prevEntries, newEntry];
+          // Ordena los registros por fecha, de más reciente a más antiguo
+          updatedEntries.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+          return updatedEntries;
+        });
+
+        // Reinicia el formulario, manteniendo la fecha actual
+        setFormData({
+          fecha: new Date().toISOString().slice(0, 10),
+          nivel: 'PRIMARIA 1A',
+          tipo: 'LIBRO',
+          incidencias: '',
+        });
+      };
+
+      // Función para actualizar un registro existente
+      const handleUpdate = () => {
+        // Formatea el texto de la incidencia antes de actualizarlo
+        const formattedIncidencia = formatIncidenciaText(formData.incidencias);
+
+        setEntries((prevEntries) => {
+          const updatedEntries = prevEntries.map(entry =>
+            entry.id === editingEntryId
+              ? { ...entry, ...formData, incidencias: formattedIncidencia }
+              : entry
+          );
+          updatedEntries.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+          return updatedEntries;
+        });
+        
+        // Finaliza el modo de edición y limpia el formulario
+        setEditingEntryId(null);
+        setFormData({
+          fecha: new Date().toISOString().slice(0, 10),
+          nivel: 'PRIMARIA 1A',
+          tipo: 'LIBRO',
+          incidencias: '',
+        });
+      };
+
+      // Inicia el modo de edición para un registro
+      const handleEdit = (entry) => {
+        setEditingEntryId(entry.id);
+        setFormData({
+          fecha: entry.fecha,
+          nivel: entry.nivel,
+          tipo: entry.tipo,
+          incidencias: entry.incidencias
+        });
+      };
+
+      // Cancela el modo de edición
+      const handleCancelEdit = () => {
+        setEditingEntryId(null);
+        setFormData({
+          fecha: new Date().toISOString().slice(0, 10),
+          nivel: 'PRIMARIA 1A',
+          tipo: 'LIBRO',
+          incidencias: '',
+        });
+      };
+      
+      // Filtra las entradas de la tabla basadas en el texto de búsqueda
+      const filteredEntries = useMemo(() => {
+        if (!searchQuery) {
+          return entries;
         }
-        .category-content {
-            flex-grow: 1;
+        const lowercasedQuery = searchQuery.toLowerCase();
+        return entries.filter(entry =>
+          entry.fecha.includes(lowercasedQuery) ||
+          entry.nivel.toLowerCase().includes(lowercasedQuery) ||
+          entry.tipo.toLowerCase().includes(lowercasedQuery) ||
+          entry.incidencias.toLowerCase().includes(lowercasedQuery)
+        );
+      }, [entries, searchQuery]);
+    
+      // Maneja la eliminación de una entrada
+      const handleDelete = (id) => {
+        setEntries((prevEntries) => prevEntries.filter(entry => entry.id !== id));
+      };
+    
+      // Función para exportar la tabla a PDF usando jsPDF
+      const handleExportPdf = () => {
+        // Asegurarse de que las librerías estén cargadas
+        if (typeof window.jspdf === 'undefined') {
+          console.error("Librería jsPDF no cargada.");
+          setExportError('Error: La librería de exportación a PDF no se ha cargado correctamente.');
+          return;
         }
-        .idea {
-            background-color: #ffffff;
-            border-left: 4px solid #00aaff;
-            padding: 10px 15px;
-            margin-top: 10px;
-            border-radius: 4px;
+        
+        if (filteredEntries.length === 0) {
+          setExportError('No hay registros filtrados para exportar a PDF.');
+          return;
         }
-        .idea strong {
-            color: #004080;
+        
+        setIsExporting(true);
+        setExportError('');
+
+        try {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF();
+          
+          // Título del documento
+          doc.setFontSize(18);
+          doc.text("Registro de Incidencias", 14, 20);
+
+          // Definir las columnas y los datos de la tabla
+          const headers = [["Fecha", "Nivel", "Tipo", "Incidencias"]];
+          const data = filteredEntries.map(entry => [entry.fecha, entry.nivel, entry.tipo, entry.incidencias]);
+          
+          // Generar la tabla con jsPDF-autoTable
+          doc.autoTable({
+            startY: 30, // Posición vertical inicial
+            head: headers,
+            body: data,
+            theme: 'striped',
+            headStyles: { fillColor: [242, 242, 242], textColor: [0, 0, 0] },
+            styles: {
+              font: "Helvetica",
+              fontSize: 10,
+              cellPadding: 3,
+              overflow: 'linebreak',
+              valign: 'middle'
+            },
+            columnStyles: {
+              3: { cellWidth: 80 } // Ancho de la columna de incidencias
+            }
+          });
+
+          // Guardar el PDF
+          doc.save(`registros_incidencias_${new Date().toISOString().slice(0, 10)}.pdf`);
+          
+          setIsExporting(false);
+        } catch (error) {
+          console.error("Error al exportar a PDF:", error);
+          setExportError('Ocurrió un error al generar el PDF. Inténtalo de nuevo.');
+          setIsExporting(false);
         }
-        .graphic {
-            width: 150px;
-            height: 150px;
-            background-size: contain;
-            background-repeat: no-repeat;
-            background-position: center;
-            border-radius: 50%;
-            border: 3px solid #00aaff;
-            flex-shrink: 0;
-        }
-        /* Imágenes incrustadas como Base64 */
-        .graphic-1 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT53ZWF0aGVyIGljb248L3RpdGxlPjxwYXRoIGQ9Ik05LDcuNUExLjUsMS41LDAsMSwxLDcuNSw5LDEuNSwxLjUsMCwwLDEsOSw3LjVaTTYsMTQuMjVBMi42MjUsMi42MjUsMCwwLDEsMy4zNzUsMTIsMi42MjUsMi42MjUsMCwwLDEsNiw5LjM3NUw4LjI1LDExLjYyNSwxMiwxMC4xMjVMMTIsMTUuMDIzQzEzLjgyNSwxNC4xODksMTUsMTIuNzUsMTUsMTIuNzVDMTUuMzcsMTIuMTUsMTUuNzUsMTAuNSwxNi44NzUsMTAuNUExLjEyNSwxLjEyNSwwLDAsMSwxOCwxMS42MjVDMTgsMTIuMDksMTcuODYzLDEyLjYxNSwxNy43MTQsMTMuMDQ2QzE3Ljg1MywxNC4yNjgsMTcuNzUsMTUuMTczLDE2LjE4NywxNi4yMjhjLS41OTQuNDktMi4wODUsMS4wMjYtMy4wNjcsMS4xMzEtMS4zNjcuMTUtMS43MTQsLjAyNy0yLjA3NC0uMDItMi4yODUtLjMyNS00LjM1NC0uOTU3LTYuNjcyLTEuNzM3QzEuNjQxLDE1LjE5My0uNTQzLDEzLjU1LDEuMTQyLDExLjAzLDIuODQ3LDguNzYsMy44NjQsOC4yNSw0LjUsOC4yNUE0LjUsNC41LDAsMCwxLDksMTJBNi41LDYuNSwwLDAsMCwxMi43NSwxMi43NUwxMi43NSwxMC4xMjVMMTQuNjIzLDExLjE5QzE2LjA0MywxMi4wOCwxNi42LDEyLjQyNSwxNi44MzcsMTIuNzg5QzE1Ljc1LDEzLjY1OSwxNC41NDgsMTQuNSwxMy4zNzUsMTUuMDExQzEyLjI0MiwxNS41NDgsMTAuNSwxNS43NSw5LDE2LjEyNUE2LjE4OCw2LjE4OCwwLDAsMSw5LDExLjI1QzEwLjUsOS43NSwxMS44MjUsOC4yNSwxMS44MjUsNy41QzExLjgyNSw2LjgxLDEwLjgzNyw2LjkzOCwxMC44MzcsNi42ODdDNy44MzcsNC4yNTgsMy4yMjYsMy42NjQsMi4wODQsMi40MDlDMS43MzEsMS43OCwxLjYyNSwxLjIzNiwxLjE2NCwxLjEzNUwuMjUsLjYyNUEuMjUsLjI1LDAsMCwxLC4yNSwwSDkuNVMxOCwwLDI2LjI1LDAuNU0xNi41LDMuMzc1QTMuMzc1LDMuMzc1LDAsMCwxLDE2LjUsLjA3NUExLjE5MSwxLjE5MSwwLDAsMSwxOCwuMDc1QTEuMTkyLDEuMTkyLDAsMCwxLDE5LjUsMy4zNzVBMy4zNzUsMy4zNzUsMCwwLDEsMTYuNSwzLjM3NVoiIGZpbGw9IiMwMDkzZDAiLz48L3N2Zz4="); }
-        .graphic-2 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT5ob21lIGljb248L3RpdGxlPjxwYXRoIGQ9Ik04LjA4NSwxMi40NjVDNy40NzUsMTIuNzUsNi45MTUsMTMuMiwyLjI1LDEzLjV2MS41SDkuMjc1bDEuNSwxLjVMMTIsMTUuMjY1VjEyLjAyQzExLjYsMTIuMzE1LDEwLjg4LDExLjI1LDExLjA4NSwxMC43MDUuNjQxLDEyLjA1My4wNzUsMTIuNSwxLjUsMTIuNS0uMTI1LDE2LjE3Ny42MjUsMTguNDkzLDQuNSwxOC42NThBNS41LDUuNSwwLDAsMCwxMiwyMy41bDEuNS0uMTc1TDEyLjA3NSwyMy4xMjVBNS41LDUuNSwwLDAsMCwxMi4wNzUsMjEuMTQ3QzEyLjgyLDIwLjM1LDExLjU3LDE4LjMsMTEuNzUsMTcuNzUuNjI1LDExLjYyNS43NSw3Ljc1LDMsNi41QTIuMTkzLDIuMTkzLDAsMCwxLDMsNi4zNzVBMS41LDEuNSwwLDAsMSw0LjUsNEExLjUsMS41LDAsMCwxLDYsNS41VjhhLjUsLjUsMCwwLDEtMSwuNXoiIGZpbGw9IiMwMDQ3YjUiLz48L3N2Zz4="); }
-        .graphic-3 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT5maXJlIGljb248L3RpdGxlPjxwYXRoIGQ9Ik05LDYuMTUzYy0uOTQ3LDAtMS43MTQsLjAyNi0yLjI3LjExQTcuMTgyLDcuMTgyLDAsMCwxLDYuNTI1LDcuNWwtLjYxNSw0LjE1LDEuNTctLjE5QzcuNzQsMTAuOTcsOS4yLDEyLDkuMiwxMi4yMjVjLjY4NSwxLjMxNSwxLjM3LDEuNTMsMS42NCwxLjk4LDEuNzY1LDMuMTI1LDMuMjI1LDIuMzU1LDQuNTM1LDEuNjU1bDEuMjgyLS42OTVjMS41Ljg0LDEuMjksMi4wMjUsMi42ODUsMi4wMjUsLjYxLDAuNjM3LDEuMTg1LDEuMDQ2LDEuOTIsMS4xNjIsMS4wNDUsLjE2NiwyLjA2LS41MjcsMy4wNjUtMS43MzZMLTEuNzUtMy40NjVjLS43OC0uOTItMi4xMS0yLjQtMy40MDUtMy41MTVsLTIuOTQzLTIuNTI2YzMuODMyLTMuMTEyLDkuMjEtLjIzNiw5LjI0NSwzLjY4LDEuODQtLjM5NSwyLjk1LTIuNDI1LDMuNTE1LTQuNzMzQzE5Ljk4LDEuMjYsMTcuNS4xODMsMTUuMjIsMi4wNjVsLTIuMDMsMS44NTJjLS45NDctLjQyNS0yLjM5Ny0uODc1LTMuNDI1LS43MDgsMi4xMjYsMy42LTIuMTgsMi41ODUtMy41ODUsNC40MjVBNC4yNTgsNC4yNTgsMCwwLDEsNy43LDEyLjM1M2EzLjUzNCwzLjUzNCwwLDAsMSwxLjMsLjkzYy43MDUtLjM3LDEuNDU1LS45NDcsMi40MjUtMS42NzVDOS45NDUsOS43NzUsMTEuNjgsOS4wOTUsMTIsOC42MjVoMS41VjEuNWgtM2MuMDgtLjg1NS0uMjUtMS42MjUtLjQtMi4xNzVsLS4yNS0uMTI1TDMuMTI1LC41QTEwLjk2NSwxMC45NjUsMCwwLDEsNS41LDIuNjI1QzYuOTIsMi41LDUuNzA1LDQuMTI1LDQuNTcsNS41QzQuMjUzLDUuODgsMi45NjUsNi42MzksMi45MDUsNy41QzIuODQsOC4yODUsMi45NTgsOC44MjksMy4wNSw5LjM1QzEuNjQyLDEwLjQsLjUxNSwxMS4xMjUsMS41LDEyLjg3NUMuOTMsMTMuMjUsMS41NiwxMy41OSwxLjUsMTQuMzc1Yy0uMTMyLDMuMDQtMS4zNTYsNS40MjUtMi4xMjUsNy4wNDYtLjg4LDEuODYtLjQxLDUuNTE1LDEuMjEsNi42OTVsMS42NDUsMS41NzVjMS40NDUuMjI1LDMuMjI1LS4xLDUuNS40TDEwLjUzNSwxOHM0LjEzOC0xLjExNSw1LjM3NS0uMTIxYzEuMjM3Ljk5NCwxLjUyNSwyLjAyNSwxLjM3NSw0LjE2NUw4LjY4MSwxNy40OTRDMTIuMjUsMTYuNjE2LDEyLjUzOCwxOS41NzUsMTEuNzUsMjAuMTg3QzExLjkxNywyMC45NDYsMTIuODc1LDE5LjYyNSwxMy41LDE5LjM2NWwxLjYyNSwxLjQ2QzE3Ljk2LDIwLjg4NywxNy43MjMsMjQuMDcsMjEuNzkyLDI0LjgyNWM0LjA2OS40NTUsNS41NCw1LjUzNSw2LjQ1LDEwLjA1TDkuNTYyLDI4LjU5NEExNS41LDE1LjUsMCwwLDAsOS42MTQsMjIuMzlBMTAuODYsMTAuODYsMCwwLDAsOSwxOS43NzVjLS42MTUtMS4wNjMtMS4yOTUtMS43NDgtMS42NzUtMi41MTZDLjA0OSwxNi42ODQsMi40ODcsMTUuMDksNC41LDE0LjU2N2MzLjQ3NS0uNTI0LDYuNTQtMS4xMjMsNy42NzUtMS43NUwxOCwxMS4xNzVDMTcuNjIsOC4xMjUsMTYuNzUsNy41LDE0Ljk4LDcuMjU1LDE0LjAxNSw3LjQyNSwxMi40NjUsNy42MjMsMTAuNSw3LjU1Yy0xLjI0My0uMjItMi41MTctLjU1Ni0zLjQ2NS0uNjQzQzQuMDUsNi40NzMsMS43MzEsNC4wNzUsMS41LDIuMTI1LDEuNCw1LjQxLDEuNzY1LDYuOTYsMS41LDcuOTdhNi40Myw2LjQzLDAsMCwxLTIuMjUuNWwzLjczLjk5NUMtLjgyNSwxNC43MTUsMS42LDExLjk4NSwzLjcxNSwxMC43MUM2LjA2LDEwLjIxLDkuMiwyLDE2LjI1LjVWMkEzLjI3NywzLjI3NywwLDAsMSwxOCwyLjYyNWEuMjUsLjI1LDAsMCwxLC41LDB2MTVhLjI1LjI1LDAsMCwxLS41LDBWMjYuMDc1TDEuNSw2Ljk3NVYxLjVMNy43MjUuMDc1Yy0xLjMxNS0uNDktMi4xNzUtLjk1NS0yLjI1LS43NXoiIGZpbGw9IiNmZjAwMDAiLz48L3N2Zz4="); }
-        .graphic-4 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT5tdXNpYyBpY29uPC90aXRsZT48cGF0aCBkPSJNNi42MTgsMjAuNjQ3QTcuNTM1LDcuNTM1LDAsMCwxLDYuNDQ3LDE3LjlDLTMuOTQsMTIuMTMyLDQuMDUsNy42MjUsNC4wNSw3LjYyNVMxNSwxLjEzNSwxOS41LDYuODU1Yy43Mi0xLjMyNywyLjItMy4xNDQsMy4wNjUtNC4wMDZDLjU1LDUtLTIuMjEzLDkuMjg3LDMuMywxMi4xMDVsMy44NCw0LjI4M2EuMDI1LjAyNSwwLDAsMSwuMTUsMGwxLjUtMS43MTdsLjk0NS0uODIzTDEuNSwxMy4zNjlhMy4wOTEsMy4wOTEsMCwwLDEtMS4zMzUtMS4xNTRBNC40NDksNC40NDksMCwwLDEsLjkxLDguMTY3QzIuNCw3LjMxLDcuNTMsMS41LDEyLDEuNWEzLjMsMy4zLDAsMCwxLDMtLjEyNUEyLjcyOSwyLjcyOSwwLDAsMSwxOCwuNTgyLDMuMTUyLDMuMTUyLDAsMCwxLDE1LjkxMyw2LjAxMkMxNC44ODgsNi42LDEyLjI0OSwxLjYzMiw4Ljg1NCwxLjYzMkg1LjM5OEMzLjcsLjYzNywxLjUsMi42OTQuNzUsNC41QzEuMyw0LjUsMS44OTUsMy42ODUsMi4yNSwzLjY4NWEyLjYyNSwyLjYyNSwwLDAsMSwxLjUtLjEyNUE3LjcxLDcuNzEsMCwwLDEsNC41LDIuNzVhMS41LDEuNSwwLDAsMSwyLjI1LDkuMzc1Yy43NzUtMS4xMDUuNjctMy4xMjUsLjQ3LTQuMjVjLS4xMjUtLjY4LS4yOTgtMS4yODQtLjM1NC0xLjU1NGEuMDI3LjAyNywwLDAsMC0uMDE4LS4wNzVjLS42NzUtLjY2Mi0uNDktMS41MzgtLjM0Mi0yLjIwOC43NzQtMy41ODksNS4xNS0yLjg5MSw4LjcyNy0xLjE4OUEzLjczOCwzLjczOCwwLDAsMSwxNy40MDQsNC40MTljLS4wNjctLjc3LS4wOTItMS40OTUtLjI2OC0yLjEzOS0uMTUtLjU0Ni0uNTkzLTEuMTE3LTEuMzY2LTEuMTM1LS45OTQtLjAyMi0xLjU3LDEuOTItMi42MDksMi40NTJhMTQuMDczLDE0LjA3MywwLDAsMS0xLjQ2My40MTRhMTYuNDcxLDE2LjQ3MSwwLDAsMC0xLjM2LDEuMDQ2bC0uMS4wMzVBNy4yMDUsNy4yMDUsMCwwLDAsOS41LDcuNWwtLjI0LjIwMWEyLjg2MiwyLjg2MiwwLDAsMC0yLjY5Mi44NjksMTMuMDU0LDEzLjA1NCwwLDAsMS02LjMyNCwxLjYyNGMtMi4xNDUtLjIxNS0yLjg0LS4yNjktMy41OTgtLjUyOS0uNzU4LS4yNTktMS4zMi0uNDMyLTEuNzU5LS43MTQtLTIuMTU5LS43MDctMy4xNzEtLjM1Mi0zLjU2OSwxLjQ3Ny0uMTgsLjk1Ny0uMTUsMi4xMTgtLjEyNSwzLjI5My4wMjIsLjk4Ny4wNzUsMS45NjkuMTUsMi45NTQuMjgyLDEuNDIzLjg1LDIuODQ3LDEuMTEyLDQuMTQzYy4xNTgsLjc3NS4zMzMsMS4zNzEuNDUsMi4wOTQuMjI1LDEuMzY5LjU4LDIuOTMzLDEuMTI1LDMuNjk0bC0uMTA5LjMyMWMtLjk1LTIuNDMzLTEuNzc3LTQuODQtMi4zNDYtNy42NzItLjkzNS00LjY2NC0uMTM5LTEwLjk3NiwxLjY2Ny0xMy4zNTFhMS42MTQsMS42MTQsMCwwLDAsLjUtLjc2MS45NTMsLjk1MywwLDAsMC0uNDg3LTEuMjE0TDMuMjI1LDEuMTI1eiIgZmlsbD0iIzAwOWMzYTAiLz48L3N2Zz4="); }
-    </style>
+      };
+      
+      // Función para establecer el texto de incidencias con un valor predefinido
+      const handlePredefinedIncidencia = (text) => {
+        setFormData(prevData => ({ ...prevData, incidencias: text }));
+      };
+    
+      // Componente JSX principal
+      return (
+        r('div', { className: 'min-h-screen bg-slate-50 p-4 sm:p-8 font-sans' },
+          r('div', { className: 'max-w-4xl mx-auto space-y-8' },
+            // Título y descripción
+            r('div', { className: 'text-center' },
+              r('h1', { className: 'text-4xl sm:text-5xl font-bold text-gray-800 tracking-tight mb-2' }, 'Registro de Incidencias'),
+              r('p', { className: 'text-gray-500 text-lg' }, 'Introduce y gestiona las incidencias por día.')
+            ),
+            
+            // Sección de formulario
+            r('div', { className: 'bg-white rounded-2xl shadow-xl p-6 sm:p-8 transition-all duration-300 hover:shadow-2xl' },
+              r('h2', { className: 'text-2xl font-semibold text-gray-700 mb-6' },
+                editingEntryId ? 'Editar Registro' : 'Nuevo Registro'
+              ),
+              r('form', { onSubmit: handleSubmit, className: 'grid grid-cols-1 md:grid-cols-2 gap-6' },
+                // Campo Fecha
+                r('div', null,
+                  r('label', { htmlFor: 'fecha', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Fecha'),
+                  r('input', {
+                    type: 'date',
+                    id: 'fecha',
+                    name: 'fecha',
+                    value: formData.fecha,
+                    onChange: handleChange,
+                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
+                    required: true
+                  })
+                ),
+                
+                // Campo Nivel
+                r('div', null,
+                  r('label', { htmlFor: 'nivel', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Nivel'),
+                  r('select', {
+                    id: 'nivel',
+                    name: 'nivel',
+                    value: formData.nivel,
+                    onChange: handleChange,
+                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
+                    required: true
+                  },
+                    r('option', { value: 'PRIMARIA 1A' }, 'PRIMARIA 1A'),
+                    r('option', { value: 'PRIMARIA 1B' }, 'PRIMARIA 1B'),
+                    r('option', { value: 'PRIMARIA 1C' }, 'PRIMARIA 1C'),
+                    r('option', { value: 'PRIMARIA 2E' }, 'PRIMARIA 2E'),
+                    r('option', { value: 'PRIMARIA 2F' }, 'PRIMARIA 2F'),
+                    r('option', { value: 'PRIMARIA 2G' }, 'PRIMARIA 2G'),
+                    r('option', { value: 'PRIMARIA 3H' }, 'PRIMARIA 3H'),
+                    r('option', { value: 'PRIMARIA 3I' }, 'PRIMARIA 3I'),
+                    r('option', { value: 'PRIMARIA 3J' }, 'PRIMARIA 3J'),
+                    r('option', { value: 'PRIMARIA 4K' }, 'PRIMARIA 4K'),
+                    r('option', { value: 'PRIMARIA 4L' }, 'PRIMARIA 4L'),
+                    r('option', { value: 'PRIMARIA 4M' }, 'PRIMARIA 4M'),
+                    r('option', { value: 'PRIMARIA 5N' }, 'PRIMARIA 5N'),
+                    r('option', { value: 'PRIMARIA 5O' }, 'PRIMARIA 5O'),
+                    r('option', { value: 'PRIMARIA 5P' }, 'PRIMARIA 5P'),
+                    r('option', { value: 'PRIMARIA 6Q' }, 'PRIMARIA 6Q'),
+                    r('option', { value: 'PRIMARIA 6R' }, 'PRIMARIA 6R'),
+                    r('option', { value: 'PRIMARIA 6S' }, 'PRIMARIA 6S'),
+                    r('option', { value: 'SECUNDARIA 1A' }, 'SECUNDARIA 1A'),
+                    r('option', { value: 'SECUNDARIA 1B' }, 'SECUNDARIA 1B'),
+                    r('option', { value: 'SECUNDARIA 1C' }, 'SECUNDARIA 1C'),
+                    r('option', { value: 'SECUNDARIA 2D' }, 'SECUNDARIA 2D'),
+                    r('option', { value: 'SECUNDARIA 2E' }, 'SECUNDARIA 2E'),
+                    r('option', { value: 'SECUNDARIA 2F' }, 'SECUNDARIA 2F'),
+                    r('option', { value: 'SECUNDARIA 3G' }, 'SECUNDARIA 3G'),
+                    r('option', { value: 'SECUNDARIA 3H' }, 'SECUNDARIA 3H'),
+                    r('option', { value: 'SECUNDARIA 3I' }, 'SECUNDARIA 3I')
+                  )
+                ),
+                
+                // Campo Tipo
+                r('div', null,
+                  r('label', { htmlFor: 'tipo', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Tipo'),
+                  r('select', {
+                    id: 'tipo',
+                    name: 'tipo',
+                    value: formData.tipo,
+                    onChange: handleChange,
+                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
+                    required: true
+                  },
+                    r('option', { value: 'LIBRO' }, 'LIBRO'),
+                    r('option', { value: 'TALLER' }, 'TALLER')
+                  )
+                ),
+                
+                // Campo Incidencias
+                r('div', { className: 'md:col-span-2' },
+                  r('label', { htmlFor: 'incidencias', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Incidencias'),
+                  r('textarea', {
+                    id: 'incidencias',
+                    name: 'incidencias',
+                    value: formData.incidencias,
+                    onChange: handleChange,
+                    rows: '4',
+                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none',
+                    placeholder: 'Escribe aquí las incidencias...',
+                    required: true
+                  }),
+                  // Botones de recomendaciones para incidencias
+                  r('div', { className: 'flex flex-wrap gap-2 mt-2' },
+                    r('button', {
+                      type: 'button',
+                      onClick: () => handlePredefinedIncidencia('SIN INCIDENCIAS'),
+                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors'
+                    }, 'SIN INCIDENCIAS'),
+                    r('button', {
+                      type: 'button',
+                      onClick: () => handlePredefinedIncidencia('LAS CLASES SE DESARROLLÓ EN EL AULA'),
+                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors'
+                    }, 'LAS CLASES SE DESARROLLÓ EN EL AULA')
+                  ),
+                  validationError && r('p', { className: 'mt-1 text-sm text-red-500' }, validationError)
+                ),
+                
+                // Botones de envío/actualización
+                r('div', { className: 'md:col-span-2 flex justify-end gap-4' },
+                  editingEntryId && (
+                    r('button', {
+                      type: 'button',
+                      onClick: handleCancelEdit,
+                      className: 'flex items-center gap-2 px-6 py-3 bg-gray-500 text-white font-semibold rounded-full shadow-lg hover:bg-gray-600 focus:outline-none focus:ring-4 focus:ring-gray-300 transition-all duration-200 transform hover:scale-105',
+                      disabled: isLoading
+                    },
+                      r(XCircle, { size: 20 }),
+                      'Cancelar'
+                    )
+                  ),
+                  r('button', {
+                    type: 'submit',
+                    className: `flex items-center gap-2 px-6 py-3 font-semibold rounded-full shadow-lg focus:outline-none focus:ring-4 transition-all duration-200 transform hover:scale-105 ${
+                      editingEntryId
+                        ? 'bg-orange-500 text-white hover:bg-orange-600 focus:ring-orange-300'
+                        : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-300'
+                    }`,
+                    disabled: isLoading
+                  },
+                    editingEntryId
+                      ? r(Edit, { size: 20 })
+                      : r(PlusCircle, { size: 20 }),
+                    editingEntryId ? 'Guardar Cambios' : 'Agregar Incidencia'
+                  )
+                )
+              )
+            ),
+    
+            // Sección de búsqueda y tabla de resultados
+            r('div', { className: 'bg-white rounded-2xl shadow-xl p-6 sm:p-8 transition-all duration-300 hover:shadow-2xl' },
+              r('div', { className: 'flex flex-col sm:flex-row justify-between items-center mb-6' },
+                r('h2', { className: 'text-2xl font-semibold text-gray-700 mb-4 sm:mb-0' }, 'Registros guardados'),
+                r('div', { className: 'flex items-center gap-4 w-full sm:w-auto' },
+                  r('div', { className: 'relative w-full' },
+                    r('input', {
+                      type: 'text',
+                      placeholder: 'Buscar por fecha, nivel o incidencia...',
+                      value: searchQuery,
+                      onChange: (e) => setSearchQuery(e.target.value),
+                      className: 'w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
+                      disabled: isLoading
+                    }),
+                    r(Search, { className: 'absolute left-3 top-1/2 -translate-y-1/2 text-gray-400', size: 20 })
+                  ),
+                  r('button', {
+                    onClick: handleExportPdf,
+                    disabled: isExporting || isLoading || filteredEntries.length === 0,
+                    className: `flex items-center gap-2 px-4 py-2 font-semibold rounded-lg shadow-md transition-all duration-200 ${
+                      isExporting || isLoading || filteredEntries.length === 0
+                        ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                        : 'bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-300'
+                    }`
+                  },
+                    isExporting
+                      ? r('svg', { className: 'animate-spin h-5 w-5 text-white', xmlns: 'http://www.w3.org/2000/svg', fill: 'none', viewBox: '0 0 24 24' },
+                          r('circle', { className: 'opacity-25', cx: '12', cy: '12', r: '10', stroke: 'currentColor', strokeWidth: '4' }),
+                          r('path', { className: 'opacity-75', fill: 'currentColor', d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z' })
+                        )
+                      : r(Fragment, null,
+                          r(FileText, { size: 20 }),
+                          `Exportar (${filteredEntries.length})`
+                        )
+                  )
+                )
+              ),
+              
+              // Muestra el mensaje de error de exportación
+              exportError && r('div', { className: 'mt-4 text-center text-red-500 flex items-center justify-center gap-2' }, 
+                r(XCircle, { size: 20 }),
+                `Error: La librería de exportación a PDF no se ha cargado correctamente.`
+              ),
+
+              // Tabla de resultados
+              isLoading ? (
+                r('div', { className: 'flex items-center justify-center p-8 text-gray-500' },
+                  r(Loader2, { className: 'animate-spin mr-2', size: 24 }),
+                  'Cargando registros...'
+                )
+              ) : (
+                r('div', { className: 'overflow-x-auto rounded-lg border border-gray-200' },
+                  filteredEntries.length > 0 ? (
+                    r('table', { className: 'min-w-full divide-y divide-gray-200' },
+                      r('thead', { className: 'bg-slate-100' },
+                        r('tr', null,
+                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Fecha'),
+                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Nivel'),
+                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Tipo'),
+                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Incidencias'),
+                          r('th', { scope: 'col', className: 'px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Acción')
+                        )
+                      ),
+                      r('tbody', { className: 'bg-white divide-y divide-gray-200' },
+                        filteredEntries.map((entry) => (
+                          r('tr', { key: entry.id, className: 'hover:bg-slate-50 transition-colors' },
+                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, entry.fecha),
+                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-600' }, entry.nivel),
+                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-600' }, entry.tipo),
+                            r('td', { className: 'px-6 py-4 text-sm text-gray-600 max-w-xs md:max-w-md overflow-hidden text-ellipsis' }, entry.incidencias),
+                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex items-center justify-end gap-2' },
+                              r('button', {
+                                onClick: () => handleEdit(entry),
+                                className: 'text-blue-500 hover:text-blue-700 transition-colors focus:outline-none'
+                              },
+                                r(Edit, { size: 18 })
+                              ),
+                              r('button', {
+                                onClick: () => handleDelete(entry.id),
+                                className: 'text-red-500 hover:text-red-700 transition-colors focus:outline-none'
+                              },
+                                r(Trash2, { size: 18 })
+                              )
+                            )
+                          )
+                        ))
+                      )
+                    )
+                  ) : (
+                    r('p', { className: 'text-center text-gray-500 p-8' }, 'No hay registros para mostrar. ¡Agrega una nueva incidencia!')
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // Renderiza la aplicación
+    const root = d(document.getElementById('root'));
+    root.render(r(App));
+  </script>
 </head>
 <body>
-
-<div class="container">
-    <h1>Generador de Ideas de Robótica</h1>
-    <p>¡Elige un problema para resolver con tu prototipo WeDo o EV3!</p>
-
-    <div class="category">
-        <div class="graphic graphic-1"></div>
-        <div class="category-content">
-            <h2>Medio Ambiente y Sustentabilidad ♻️</h2>
-            <div class="idea">
-                <strong>Problemática:</strong> ¿Cómo podemos ayudar a mantener limpios los océanos y ríos de los plásticos y basura?
-                <br>
-                <strong>Posible prototipo:</strong> Un robot que recoja o clasifique desechos.
-            </div>
-        </div>
-    </div>
-
-    <div class="category">
-        <div class="graphic graphic-2"></div>
-        <div class="category-content">
-            <h2>Hogar y Vida Cotidiana 🏠</h2>
-            <div class="idea">
-                <strong>Problemática:</strong> Las personas mayores tienen dificultad para alcanzar objetos en lugares altos. ¿Cómo podría un robot ayudarles?
-                <br>
-                <strong>Posible prototipo:</strong> Un brazo robótico que agarre y desplace objetos.
-            </div>
-        </div>
-    </div>
-
-    <div class="category">
-        <div class="graphic graphic-3"></div>
-        <div class="category-content">
-            <h2>Seguridad y Emergencias 🚨</h2>
-            <div class="idea">
-                <strong>Problemática:</strong> ¿Cómo podríamos alertar a las personas sobre un incendio o un terremoto de forma rápida y eficiente?
-                <br>
-                <strong>Posible prototipo:</strong> Un sistema de alarma que detecte movimiento o temperatura.
-            </div>
-        </div>
-    </div>
-
-    <div class="category">
-        <div class="graphic graphic-4"></div>
-        <div class="category-content">
-            <h2>Entretenimiento y Creatividad 🤖</h2>
-            <div class="idea">
-                <strong>Problemática:</strong> ¿Cómo podemos crear juguetes que sean más interactivos y respondan a las acciones de los niños?
-                <br>
-                <strong>Posible prototipo:</strong> Un animal robótico que cambie de color o emita sonidos.
-            </div>
-        </div>
-    </div>
-
-</div>
-
+  <div id="root"></div>
 </body>
 </html>
