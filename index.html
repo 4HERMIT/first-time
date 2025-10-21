@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
@@ -9,19 +9,46 @@
   <!-- Enlace a las librerías jsPDF y jsPDF-autoTable para la exportación -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
-  <!-- Enlace a los iconos de Lucide React -->
+  
   <script type="module">
+    // Importaciones de React
     import { createElement as r, useState, useMemo, useRef, useEffect, Fragment } from 'https://esm.sh/react@18.2.0';
     import { createRoot as d } from 'https://esm.sh/react-dom@18.2.0/client';
-    import { PlusCircle, Search, Trash2, FileText, Loader2, XCircle, Edit } from 'https://esm.sh/lucide-react@0.292.0';
+    import { PlusCircle, Search, Trash2, FileText, Loader2, XCircle, Edit, ServerCrash } from 'https://esm.sh/lucide-react@0.292.0';
 
-    // A continuación se encuentra el código de la aplicación de React
+    // Importaciones de Firebase (URLs de CDN)
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    // FIX: Se agregó signInWithCustomToken a las importaciones de firebase-auth.js
+    import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // Habilitar logs de depuración para Firestore
+    setLogLevel('debug');
+    
+    // CONFIGURACIÓN GLOBAL DE FIREBASE
+    // La app ID se utiliza para definir el path de la base de datos (firestore security rules)
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // La configuración de Firebase se obtiene de la variable global (proporcionada por el entorno)
+    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+    // Inicializar Firebase
+    let app, auth, db;
+    if (Object.keys(firebaseConfig).length > 0) {
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+    } else {
+      console.error("Firebase config no está disponible o está vacía.");
+    }
+
+    // Componente principal de React
     const App = () => {
       // Estado para guardar los datos del formulario actual
       const [formData, setFormData] = useState({
         fecha: new Date().toISOString().slice(0, 10), // Fecha actual por defecto
-        nivel: 'PRIMARIA 1A', // Valor por defecto actualizado
-        tipo: 'LIBRO', // Valor por defecto actualizado a 'LIBRO'
+        nivel: 'PRIMARIA 1A', 
+        tipo: 'LIBRO', 
         incidencias: '',
       });
     
@@ -30,144 +57,201 @@
       
       // Estado para la barra de búsqueda
       const [searchQuery, setSearchQuery] = useState('');
-    
+      
       // Estado para mostrar mensajes de validación
       const [validationError, setValidationError] = useState('');
-    
+      
       // Estado para el indicador de carga del PDF
       const [isExporting, setIsExporting] = useState(false);
-      // Nuevo estado para manejar errores de exportación
       const [exportError, setExportError] = useState('');
 
-      // Estado para el indicador de carga de la base de datos
+      // Estado para el indicador de carga/conexión
       const [isLoading, setIsLoading] = useState(true);
+      const [dbError, setDbError] = useState(null);
+      const [userId, setUserId] = useState(null);
 
-      // Nuevo estado para controlar el modo de edición
+      // Estado para controlar el modo de edición
       const [editingEntryId, setEditingEntryId] = useState(null);
+
+      // Path de la colección privada del usuario
+      const getCollectionPath = (uid) => `/artifacts/${appId}/users/${uid}/incidencias_registros`;
+
+      // --- 1. CONFIGURACIÓN Y AUTENTICACIÓN DE FIREBASE ---
+      useEffect(() => {
+        if (!db) {
+            setDbError("Error: Firebase no inicializado. Verifica la configuración.");
+            setIsLoading(false);
+            return;
+        }
+
+        // 1. Manejar la autenticación (usamos anónimo por simplicidad)
+        const setupAuth = async () => {
+            try {
+                // Si la token inicial está disponible, la usamos. Si no, iniciamos anónimamente.
+                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                
+                if (token) {
+                    await signInWithCustomToken(auth, token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Error en la autenticación de Firebase:", error);
+                setDbError("Fallo en la autenticación. Intenta recargar la página.");
+            }
+        };
+
+        // 2. Escuchar cambios de estado de autenticación
+        const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+            if (user) {
+                setUserId(user.uid);
+            } else {
+                setUserId(null);
+            }
+        });
+
+        setupAuth();
+        return () => unsubscribeAuth(); // Limpiar el listener de auth al desmontar
+      }, []);
+
+      // --- 2. ESCUCHA DE DATOS EN TIEMPO REAL (onSnapshot) ---
+      useEffect(() => {
+        if (!db || !userId) {
+          if (!db) setDbError("Error de conexión a Firestore.");
+          // No iniciar la escucha hasta tener el userId
+          return;
+        }
+
+        const path = getCollectionPath(userId);
+        const q = query(collection(db, path), orderBy("fecha", "desc"));
+
+        // onSnapshot escucha los cambios en tiempo real
+        const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+            const fetchedEntries = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                // Aseguramos que la fecha sea un string para el estado
+                fetchedEntries.push({
+                    id: doc.id,
+                    ...data,
+                    fecha: data.fecha, // Debería ser un string en este caso
+                });
+            });
+            setEntries(fetchedEntries);
+            setIsLoading(false);
+            setDbError(null); // Limpiar cualquier error previo
+        }, (error) => {
+            console.error("Error al obtener los datos de Firestore:", error);
+            setDbError("Error al cargar los datos. Verifica tus reglas de seguridad en Firebase.");
+            setIsLoading(false);
+        });
+
+        // Limpiar el listener cuando el componente se desmonte o el userId cambie
+        return () => unsubscribeSnapshot();
+      }, [db, userId]); 
 
       // Función para formatear el texto: la primera letra de cada oración en mayúscula
       const formatIncidenciaText = (text) => {
-        // Convierte todo a minúsculas para un formato consistente
         const lowercased = text.toLowerCase();
-        // Divide el texto por puntos y espacios
         const sentences = lowercased.split('. ');
         
-        // Mapea cada oración para capitalizar la primera letra
         const formattedSentences = sentences.map(sentence => {
           if (sentence.length > 0) {
-            // Capitaliza la primera letra y concatena el resto de la oración
             return sentence.charAt(0).toUpperCase() + sentence.slice(1);
           }
           return sentence;
         });
         
-        // Une las oraciones de nuevo con un punto y espacio
         return formattedSentences.join('. ');
       };
 
 
-      // Cargar registros desde el almacenamiento local al inicio
-      useEffect(() => {
-        try {
-          const savedEntries = localStorage.getItem('incidencias_registros');
-          if (savedEntries) {
-            // Ordenamos los registros por fecha en memoria, de más reciente a más antiguo
-            const parsedEntries = JSON.parse(savedEntries);
-            parsedEntries.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-            setEntries(parsedEntries);
-          }
-        } catch (error) {
-          console.error("Error al cargar los datos del almacenamiento local:", error);
-          // Si hay un error, se inicializa con un array vacío
-          setEntries([]);
-        } finally {
-          setIsLoading(false);
-        }
-      }, []);
-
-      // Guardar registros en el almacenamiento local cada vez que cambian
-      useEffect(() => {
-        if (entries.length > 0) {
-          localStorage.setItem('incidencias_registros', JSON.stringify(entries));
-        } else if (entries.length === 0 && !isLoading) {
-          // Si el array está vacío y ya se ha cargado, se borra el local storage
-          localStorage.removeItem('incidencias_registros');
-        }
-      }, [entries, isLoading]);
-    
       // Maneja los cambios en los campos del formulario
       const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData((prevData) => ({ ...prevData, [name]: value }));
       };
-    
+      
       // Maneja el envío del formulario para agregar una nueva entrada
-      const handleSubmit = (e) => {
+      const handleSubmit = async (e) => {
         e.preventDefault();
         if (!formData.incidencias) {
           setValidationError('Por favor, ingresa el campo de incidencias.');
           return;
         }
-        setValidationError(''); // Limpia el error si la entrada es válida
-        
+        setValidationError(''); 
+
         // Si estamos en modo de edición, actualizamos el registro
         if (editingEntryId) {
           handleUpdate();
           return;
         }
 
-        // Formatea el texto de la incidencia antes de guardarlo
+        if (!userId) {
+          setDbError("Error: Usuario no autenticado. No se puede guardar.");
+          return;
+        }
+
+        setIsLoading(true);
         const formattedIncidencia = formatIncidenciaText(formData.incidencias);
+        
+        try {
+          // Usamos addDoc para agregar un nuevo documento a la colección
+          await addDoc(collection(db, getCollectionPath(userId)), {
+            fecha: formData.fecha,
+            nivel: formData.nivel,
+            tipo: formData.tipo,
+            incidencias: formattedIncidencia,
+            timestamp: new Date().toISOString() // Sello de tiempo (opcional para ordenar)
+          });
 
-        // Crea un objeto para la nueva entrada con un ID único
-        const newEntry = {
-          id: new Date().getTime().toString(),
-          fecha: formData.fecha,
-          nivel: formData.nivel,
-          tipo: formData.tipo,
-          incidencias: formattedIncidencia,
-        };
+          // Reinicia el formulario
+          setFormData({
+            fecha: new Date().toISOString().slice(0, 10),
+            nivel: 'PRIMARIA 1A',
+            tipo: 'LIBRO',
+            incidencias: '',
+          });
 
-        setEntries((prevEntries) => {
-          // Agrega la nueva entrada al array de registros
-          const updatedEntries = [...prevEntries, newEntry];
-          // Ordena los registros por fecha, de más reciente a más antiguo
-          updatedEntries.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-          return updatedEntries;
-        });
-
-        // Reinicia el formulario, manteniendo la fecha actual
-        setFormData({
-          fecha: new Date().toISOString().slice(0, 10),
-          nivel: 'PRIMARIA 1A',
-          tipo: 'LIBRO',
-          incidencias: '',
-        });
+        } catch (error) {
+          console.error("Error al agregar documento:", error);
+          setDbError("Fallo al guardar la incidencia en la nube.");
+        } finally {
+          setIsLoading(false);
+        }
       };
 
       // Función para actualizar un registro existente
-      const handleUpdate = () => {
-        // Formatea el texto de la incidencia antes de actualizarlo
+      const handleUpdate = async () => {
+        if (!editingEntryId || !userId) return;
+
+        setIsLoading(true);
         const formattedIncidencia = formatIncidenciaText(formData.incidencias);
 
-        setEntries((prevEntries) => {
-          const updatedEntries = prevEntries.map(entry =>
-            entry.id === editingEntryId
-              ? { ...entry, ...formData, incidencias: formattedIncidencia }
-              : entry
-          );
-          updatedEntries.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-          return updatedEntries;
-        });
-        
-        // Finaliza el modo de edición y limpia el formulario
-        setEditingEntryId(null);
-        setFormData({
-          fecha: new Date().toISOString().slice(0, 10),
-          nivel: 'PRIMARIA 1A',
-          tipo: 'LIBRO',
-          incidencias: '',
-        });
+        try {
+          const docRef = doc(db, getCollectionPath(userId), editingEntryId);
+          await updateDoc(docRef, {
+            fecha: formData.fecha,
+            nivel: formData.nivel,
+            tipo: formData.tipo,
+            incidencias: formattedIncidencia,
+          });
+
+          // Finaliza el modo de edición y limpia el formulario
+          setEditingEntryId(null);
+          setFormData({
+            fecha: new Date().toISOString().slice(0, 10),
+            nivel: 'PRIMARIA 1A',
+            tipo: 'LIBRO',
+            incidencias: '',
+          });
+
+        } catch (error) {
+          console.error("Error al actualizar documento:", error);
+          setDbError("Fallo al actualizar la incidencia en la nube.");
+        } finally {
+          setIsLoading(false);
+        }
       };
 
       // Inicia el modo de edición para un registro
@@ -179,6 +263,7 @@
           tipo: entry.tipo,
           incidencias: entry.incidencias
         });
+        setValidationError('');
       };
 
       // Cancela el modo de edición
@@ -190,6 +275,7 @@
           tipo: 'LIBRO',
           incidencias: '',
         });
+        setValidationError('');
       };
       
       // Filtra las entradas de la tabla basadas en el texto de búsqueda
@@ -205,15 +291,30 @@
           entry.incidencias.toLowerCase().includes(lowercasedQuery)
         );
       }, [entries, searchQuery]);
-    
+      
       // Maneja la eliminación de una entrada
-      const handleDelete = (id) => {
-        setEntries((prevEntries) => prevEntries.filter(entry => entry.id !== id));
+      const handleDelete = async (id) => {
+        if (!userId) return;
+        
+        setIsLoading(true);
+        try {
+          // Usamos deleteDoc para eliminar el documento
+          await deleteDoc(doc(db, getCollectionPath(userId), id));
+          // onSnapshot se encargará de actualizar el estado 'entries'
+          if (editingEntryId === id) {
+             // Si el registro borrado es el que se estaba editando, se cancela la edición
+             handleCancelEdit();
+          }
+        } catch (error) {
+          console.error("Error al eliminar documento:", error);
+          setDbError("Fallo al eliminar la incidencia en la nube.");
+        } finally {
+          setIsLoading(false);
+        }
       };
-    
+      
       // Función para exportar la tabla a PDF usando jsPDF
       const handleExportPdf = () => {
-        // Asegurarse de que las librerías estén cargadas
         if (typeof window.jspdf === 'undefined') {
           console.error("Librería jsPDF no cargada.");
           setExportError('Error: La librería de exportación a PDF no se ha cargado correctamente.');
@@ -232,17 +333,14 @@
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF();
           
-          // Título del documento
           doc.setFontSize(18);
           doc.text("Registro de Incidencias", 14, 20);
 
-          // Definir las columnas y los datos de la tabla
           const headers = [["Fecha", "Nivel", "Tipo", "Incidencias"]];
           const data = filteredEntries.map(entry => [entry.fecha, entry.nivel, entry.tipo, entry.incidencias]);
           
-          // Generar la tabla con jsPDF-autoTable
           doc.autoTable({
-            startY: 30, // Posición vertical inicial
+            startY: 30, 
             head: headers,
             body: data,
             theme: 'striped',
@@ -255,11 +353,10 @@
               valign: 'middle'
             },
             columnStyles: {
-              3: { cellWidth: 80 } // Ancho de la columna de incidencias
+              3: { cellWidth: 80 } 
             }
           });
 
-          // Guardar el PDF
           doc.save(`registros_incidencias_${new Date().toISOString().slice(0, 10)}.pdf`);
           
           setIsExporting(false);
@@ -274,17 +371,27 @@
       const handlePredefinedIncidencia = (text) => {
         setFormData(prevData => ({ ...prevData, incidencias: text }));
       };
-    
+      
       // Componente JSX principal
       return (
         r('div', { className: 'min-h-screen bg-slate-50 p-4 sm:p-8 font-sans' },
           r('div', { className: 'max-w-4xl mx-auto space-y-8' },
-            // Título y descripción
+            // Título, Descripción y UID
             r('div', { className: 'text-center' },
               r('h1', { className: 'text-4xl sm:text-5xl font-bold text-gray-800 tracking-tight mb-2' }, 'Registro de Incidencias'),
-              r('p', { className: 'text-gray-500 text-lg' }, 'Introduce y gestiona las incidencias por día.')
+              r('p', { className: 'text-gray-500 text-lg mb-4' }, 'Introduce y gestiona las incidencias por día.'),
+              userId && r('p', { className: 'text-xs text-gray-400' }, 
+                  r('span', { className: 'font-semibold text-gray-600' }, 'ID de Usuario: '), userId
+              )
             ),
             
+            // Mensajes de Error de la base de datos
+            dbError && r('div', { className: 'bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative shadow-md', role: 'alert' },
+                r('p', { className: 'font-bold' }, 'Error de Conexión:'),
+                r('p', { className: 'text-sm' }, dbError),
+                r('p', { className: 'text-xs mt-1' }, 'Nota: Esto puede deberse a la configuración inicial de tu proyecto en Firebase.')
+            ),
+
             // Sección de formulario
             r('div', { className: 'bg-white rounded-2xl shadow-xl p-6 sm:p-8 transition-all duration-300 hover:shadow-2xl' },
               r('h2', { className: 'text-2xl font-semibold text-gray-700 mb-6' },
@@ -301,7 +408,8 @@
                     value: formData.fecha,
                     onChange: handleChange,
                     className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                    required: true
+                    required: true,
+                    disabled: isLoading
                   })
                 ),
                 
@@ -314,7 +422,8 @@
                     value: formData.nivel,
                     onChange: handleChange,
                     className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                    required: true
+                    required: true,
+                    disabled: isLoading
                   },
                     r('option', { value: 'PRIMARIA 1A' }, 'PRIMARIA 1A'),
                     r('option', { value: 'PRIMARIA 1B' }, 'PRIMARIA 1B'),
@@ -355,13 +464,17 @@
                     value: formData.tipo,
                     onChange: handleChange,
                     className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                    required: true
+                    required: true,
+                    disabled: isLoading
                   },
                     r('option', { value: 'LIBRO' }, 'LIBRO'),
                     r('option', { value: 'TALLER' }, 'TALLER')
                   )
                 ),
                 
+                // Espacio vacío para completar la parrilla en móvil
+                r('div', { className: 'hidden md:block' }),
+
                 // Campo Incidencias
                 r('div', { className: 'md:col-span-2' },
                   r('label', { htmlFor: 'incidencias', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Incidencias'),
@@ -373,19 +486,22 @@
                     rows: '4',
                     className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none',
                     placeholder: 'Escribe aquí las incidencias...',
-                    required: true
+                    required: true,
+                    disabled: isLoading
                   }),
                   // Botones de recomendaciones para incidencias
                   r('div', { className: 'flex flex-wrap gap-2 mt-2' },
                     r('button', {
                       type: 'button',
                       onClick: () => handlePredefinedIncidencia('SIN INCIDENCIAS'),
-                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors'
+                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors',
+                      disabled: isLoading
                     }, 'SIN INCIDENCIAS'),
                     r('button', {
                       type: 'button',
                       onClick: () => handlePredefinedIncidencia('LAS CLASES SE DESARROLLÓ EN EL AULA'),
-                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors'
+                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors',
+                      disabled: isLoading
                     }, 'LAS CLASES SE DESARROLLÓ EN EL AULA')
                   ),
                   validationError && r('p', { className: 'mt-1 text-sm text-red-500' }, validationError)
@@ -411,17 +527,21 @@
                         ? 'bg-orange-500 text-white hover:bg-orange-600 focus:ring-orange-300'
                         : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-300'
                     }`,
-                    disabled: isLoading
+                    disabled: isLoading || dbError 
                   },
+                    isLoading && r('svg', { className: 'animate-spin h-5 w-5 text-white', xmlns: 'http://www.w3.org/2000/svg', fill: 'none', viewBox: '0 0 24 24' },
+                        r('circle', { className: 'opacity-25', cx: '12', cy: '12', r: '10', stroke: 'currentColor', strokeWidth: '4' }),
+                        r('path', { className: 'opacity-75', fill: 'currentColor', d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z' })
+                    ),
                     editingEntryId
-                      ? r(Edit, { size: 20 })
-                      : r(PlusCircle, { size: 20 }),
+                      ? r(Edit, { size: 20, className: isLoading ? 'hidden' : '' })
+                      : r(PlusCircle, { size: 20, className: isLoading ? 'hidden' : '' }),
                     editingEntryId ? 'Guardar Cambios' : 'Agregar Incidencia'
                   )
                 )
               )
             ),
-    
+            
             // Sección de búsqueda y tabla de resultados
             r('div', { className: 'bg-white rounded-2xl shadow-xl p-6 sm:p-8 transition-all duration-300 hover:shadow-2xl' },
               r('div', { className: 'flex flex-col sm:flex-row justify-between items-center mb-6' },
@@ -463,7 +583,7 @@
               // Muestra el mensaje de error de exportación
               exportError && r('div', { className: 'mt-4 text-center text-red-500 flex items-center justify-center gap-2' }, 
                 r(XCircle, { size: 20 }),
-                `Error: La librería de exportación a PDF no se ha cargado correctamente.`
+                exportError
               ),
 
               // Tabla de resultados
@@ -495,13 +615,15 @@
                             r('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex items-center justify-end gap-2' },
                               r('button', {
                                 onClick: () => handleEdit(entry),
-                                className: 'text-blue-500 hover:text-blue-700 transition-colors focus:outline-none'
+                                className: 'text-blue-500 hover:text-blue-700 transition-colors focus:outline-none',
+                                disabled: isLoading
                               },
                                 r(Edit, { size: 18 })
                               ),
                               r('button', {
                                 onClick: () => handleDelete(entry.id),
-                                className: 'text-red-500 hover:text-red-700 transition-colors focus:outline-none'
+                                className: 'text-red-500 hover:text-red-700 transition-colors focus:outline-none',
+                                disabled: isLoading
                               },
                                 r(Trash2, { size: 18 })
                               )
