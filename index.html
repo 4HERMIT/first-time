@@ -18,18 +18,15 @@
 
     // Importaciones de Firebase (URLs de CDN)
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    // FIX: Se agregó signInWithCustomToken a las importaciones de firebase-auth.js
     import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import { getFirestore, collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-    // Habilitar logs de depuración para Firestore
+    // Habilitar logs de depuración para Firestore (útil para ver errores de permiso)
     setLogLevel('debug');
     
     // CONFIGURACIÓN GLOBAL DE FIREBASE
-    // La app ID se utiliza para definir el path de la base de datos (firestore security rules)
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    // La configuración de Firebase se obtiene de la variable global (proporcionada por el entorno)
+    // La configuración de Firebase se inyecta en el entorno
     const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
 
     // Inicializar Firebase
@@ -68,13 +65,14 @@
       // Estado para el indicador de carga/conexión
       const [isLoading, setIsLoading] = useState(true);
       const [dbError, setDbError] = useState(null);
-      const [userId, setUserId] = useState(null);
+      const [userId, setUserId] = useState(null); // ID del usuario autenticado
 
       // Estado para controlar el modo de edición
       const [editingEntryId, setEditingEntryId] = useState(null);
 
-      // Path de la colección privada del usuario
-      const getCollectionPath = (uid) => `/artifacts/${appId}/users/${uid}/incidencias_registros`;
+      // --- RUTA SIMPLIFICADA DE LA COLECCIÓN ---
+      // Esta ruta debe coincidir con la regla de seguridad simplificada en Firebase: /incidencias/{userId}/registros
+      const getCollectionPath = (uid) => `incidencias/${uid}/registros`;
 
       // --- 1. CONFIGURACIÓN Y AUTENTICACIÓN DE FIREBASE ---
       useEffect(() => {
@@ -84,15 +82,14 @@
             return;
         }
 
-        // 1. Manejar la autenticación (usamos anónimo por simplicidad)
         const setupAuth = async () => {
             try {
-                // Si la token inicial está disponible, la usamos. Si no, iniciamos anónimamente.
                 const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
                 
                 if (token) {
                     await signInWithCustomToken(auth, token);
                 } else {
+                    // Usar signInAnonymously si no hay token de autenticación personalizado
                     await signInAnonymously(auth);
                 }
             } catch (error) {
@@ -101,9 +98,9 @@
             }
         };
 
-        // 2. Escuchar cambios de estado de autenticación
         const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
             if (user) {
+                // Si la autenticación es exitosa, guardamos el UID
                 setUserId(user.uid);
             } else {
                 setUserId(null);
@@ -111,7 +108,7 @@
         });
 
         setupAuth();
-        return () => unsubscribeAuth(); // Limpiar el listener de auth al desmontar
+        return () => unsubscribeAuth(); 
       }, []);
 
       // --- 2. ESCUCHA DE DATOS EN TIEMPO REAL (onSnapshot) ---
@@ -123,30 +120,32 @@
         }
 
         const path = getCollectionPath(userId);
-        const q = query(collection(db, path), orderBy("fecha", "desc"));
+        // Creamos una referencia a la colección de registros del usuario
+        const userRecordsCollection = collection(db, path);
+        // Ordenamos por fecha de forma descendente
+        const q = query(userRecordsCollection, orderBy("fecha", "desc"));
 
         // onSnapshot escucha los cambios en tiempo real
         const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
             const fetchedEntries = [];
             snapshot.forEach((doc) => {
                 const data = doc.data();
-                // Aseguramos que la fecha sea un string para el estado
                 fetchedEntries.push({
                     id: doc.id,
                     ...data,
-                    fecha: data.fecha, // Debería ser un string en este caso
+                    fecha: data.fecha, 
                 });
             });
             setEntries(fetchedEntries);
             setIsLoading(false);
-            setDbError(null); // Limpiar cualquier error previo
+            setDbError(null); 
         }, (error) => {
-            console.error("Error al obtener los datos de Firestore:", error);
-            setDbError("Error al cargar los datos. Verifica tus reglas de seguridad en Firebase.");
+            console.error("Error al obtener los datos de Firestore (Probablemente PERMISSION DENIED):", error);
+            // Mensaje específico para ayudar a depurar reglas de seguridad
+            setDbError("Error al cargar los datos. Verifica tus reglas de seguridad en Firebase y la ruta de la colección.");
             setIsLoading(false);
         });
 
-        // Limpiar el listener cuando el componente se desmonte o el userId cambie
         return () => unsubscribeSnapshot();
       }, [db, userId]); 
 
@@ -181,7 +180,6 @@
         }
         setValidationError(''); 
 
-        // Si estamos en modo de edición, actualizamos el registro
         if (editingEntryId) {
           handleUpdate();
           return;
@@ -196,13 +194,12 @@
         const formattedIncidencia = formatIncidenciaText(formData.incidencias);
         
         try {
-          // Usamos addDoc para agregar un nuevo documento a la colección
           await addDoc(collection(db, getCollectionPath(userId)), {
             fecha: formData.fecha,
             nivel: formData.nivel,
             tipo: formData.tipo,
             incidencias: formattedIncidencia,
-            timestamp: new Date().toISOString() // Sello de tiempo (opcional para ordenar)
+            timestamp: new Date().toISOString() 
           });
 
           // Reinicia el formulario
@@ -298,11 +295,8 @@
         
         setIsLoading(true);
         try {
-          // Usamos deleteDoc para eliminar el documento
           await deleteDoc(doc(db, getCollectionPath(userId), id));
-          // onSnapshot se encargará de actualizar el estado 'entries'
           if (editingEntryId === id) {
-             // Si el registro borrado es el que se estaba editando, se cancela la edición
              handleCancelEdit();
           }
         } catch (error) {
@@ -389,7 +383,7 @@
             dbError && r('div', { className: 'bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative shadow-md', role: 'alert' },
                 r('p', { className: 'font-bold' }, 'Error de Conexión:'),
                 r('p', { className: 'text-sm' }, dbError),
-                r('p', { className: 'text-xs mt-1' }, 'Nota: Esto puede deberse a la configuración inicial de tu proyecto en Firebase.')
+                r('p', { className: 'text-xs mt-1' }, 'Nota: Esto puede deberse a la configuración de tus reglas de seguridad en Firebase.')
             ),
 
             // Sección de formulario
