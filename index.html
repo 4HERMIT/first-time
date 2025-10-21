@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Ideas de Robótica</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f8ff;
+            color: #333;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #0056b3;
+            text-align: center;
+            border-bottom: 3px solid #0056b3;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .category {
+            background-color: #e6f7ff;
+            border: 1px solid #b3e0ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .category h2 {
+            color: #007bb5;
+            margin-top: 0;
+        }
+        .category-content {
+            flex-grow: 1;
+        }
+        .idea {
+            background-color: #ffffff;
+            border-left: 4px solid #00aaff;
+            padding: 10px 15px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .idea strong {
+            color: #004080;
+        }
+        .graphic {
+            width: 150px;
+            height: 150px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            border-radius: 50%;
+            border: 3px solid #00aaff;
+            flex-shrink: 0;
+        }
+        /* Imágenes incrustadas como Base64 */
+        .graphic-1 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT53ZWF0aGVyIGljb248L3RpdGxlPjxwYXRoIGQ9Ik05LDcuNUExLjUsMS41LDAsMSwxLDcuNSw5LDEuNSwxLjUsMCwwLDEsOSw3LjVaTTYsMTQuMjVBMi42MjUsMi42MjUsMCwwLDEsMy4zNzUsMTIsMi42MjUsMi42MjUsMCwwLDEsNiw5LjM3NUw4LjI1LDExLjYyNSwxMiwxMC4xMjVMMTIsMTUuMDIzQzEzLjgyNSwxNC4xODksMTUsMTIuNzUsMTUsMTIuNzVDMTUuMzcsMTIuMTUsMTUuNzUsMTAuNSwxNi44NzUsMTAuNUExLjEyNSwxLjEyNSwwLDAsMSwxOCwxMS42MjVDMTgsMTIuMDksMTcuODYzLDEyLjYxNSwxNy43MTQsMTMuMDQ2QzE3Ljg1MywxNC4yNjgsMTcuNzUsMTUuMTczLDE2LjE4NywxNi4yMjhjLS41OTQuNDktMi4wODUsMS4wMjYtMy4wNjcsMS4xMzEtMS4zNjcuMTUtMS43MTQsLjAyNy0yLjA3NC0uMDItMi4yODUtLjMyNS00LjM1NC0uOTU3LTYuNjcyLTEuNzM3QzEuNjQxLDE1LjE5My0uNTQzLDEzLjU1LDEuMTQyLDExLjAzLDIuODQ3LDguNzYsMy44NjQsOC4yNSw0LjUsOC4yNUE0LjUsNC41LDAsMCwxLDksMTJBNi41LDYuNSwwLDAsMCwxMi43NSwxMi43NUwxMi43NSwxMC4xMjVMMTQuNjIzLDExLjE5QzE2LjA0MywxMi4wOCwxNi42LDEyLjQyNSwxNi44MzcsMTIuNzg5QzE1Ljc1LDEzLjY1OSwxNC41NDgsMTQuNSwxMy4zNzUsMTUuMDExQzEyLjI0MiwxNS41NDgsMTAuNSwxNS43NSw5LDE2LjEyNUE2LjE4OCw2LjE4OCwwLDAsMSw5LDExLjI1QzEwLjUsOS43NSwxMS44MjUsOC4yNSwxMS44MjUsNy41QzExLjgyNSw2LjgxLDEwLjgzNyw2LjkzOCwxMC44MzcsNi42ODdDNy44MzcsNC4yNTgsMy4yMjYsMy42NjQsMi4wODQsMi40MDlDMS43MzEsMS43OCwxLjYyNSwxLjIzNiwxLjE2NCwxLjEzNUwuMjUsLjYyNUEuMjUsLjI1LDAsMCwxLC4yNSwwSDkuNVMxOCwwLDI2LjI1LDAuNU0xNi41LDMuMzc1QTMuMzc1LDMuMzc1LDAsMCwxLDE2LjUsLjA3NUExLjE5MSwxLjE5MSwwLDAsMSwxOCwuMDc1QTEuMTkyLDEuMTkyLDAsMCwxLDE5LjUsMy4zNzVBMy4zNzUsMy4zNzUsMCwwLDEsMTYuNSwzLjM3NVoiIGZpbGw9IiMwMDkzZDAiLz48L3N2Zz4="); }
+        .graphic-2 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT5ob21lIGljb248L3RpdGxlPjxwYXRoIGQ9Ik04LjA4NSwxMi40NjVDNy40NzUsMTIuNzUsNi45MTUsMTMuMiwyLjI1LDEzLjV2MS41SDkuMjc1bDEuNSwxLjVMMTIsMTUuMjY1VjEyLjAyQzExLjYsMTIuMzE1LDEwLjg4LDExLjI1LDExLjA4NSwxMC43MDUuNjQxLDEyLjA1My4wNzUsMTIuNSwxLjUsMTIuNS0uMTI1LDE2LjE3Ny42MjUsMTguNDkzLDQuNSwxOC42NThBNS41LDUuNSwwLDAsMCwxMiwyMy41bDEuNS0uMTc1TDEyLjA3NSwyMy4xMjVBNS41LDUuNSwwLDAsMCwxMi4wNzUsMjEuMTQ3QzEyLjgyLDIwLjM1LDExLjU3LDE4LjMsMTEuNzUsMTcuNzUuNjI1LDExLjYyNS43NSw3Ljc1LDMsNi41QTIuMTkzLDIuMTkzLDAsMCwxLDMsNi4zNzVBMS41LDEuNSwwLDAsMSw0LjUsNEExLjUsMS41LDAsMCwxLDYsNS41VjhhLjUsLjUsMCwwLDEtMSwuNXoiIGZpbGw9IiMwMDQ3YjUiLz48L3N2Zz4="); }
+        .graphic-3 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT5maXJlIGljb248L3RpdGxlPjxwYXRoIGQ9Ik05LDYuMTUzYy0uOTQ3LDAtMS43MTQsLjAyNi0yLjI3LjExQTcuMTgyLDcuMTgyLDAsMCwxLDYuNTI1LDcuNWwtLjYxNSw0LjE1LDEuNTctLjE5QzcuNzQsMTAuOTcsOS4yLDEyLDkuMiwxMi4yMjVjLjY4NSwxLjMxNSwxLjM3LDEuNTMsMS42NCwxLjk4LDEuNzY1LDMuMTI1LDMuMjI1LDIuMzU1LDQuNTM1LDEuNjU1bDEuMjgyLS42OTVjMS41Ljg0LDEuMjksMi4wMjUsMi42ODUsMi4wMjUsLjYxLDAuNjM3LDEuMTg1LDEuMDQ2LDEuOTIsMS4xNjIsMS4wNDUsLjE2NiwyLjA2LS41MjcsMy4wNjUtMS43MzZMLTEuNzUtMy40NjVjLS43OC0uOTItMi4xMS0yLjQtMy40MDUtMy41MTVsLTIuOTQzLTIuNTI2YzMuODMyLTMuMTEyLDkuMjEtLjIzNiw5LjI0NSwzLjY4LDEuODQtLjM5NSwyLjk1LTIuNDI1LDMuNTE1LTQuNzMzQzE5Ljk4LDEuMjYsMTcuNS4xODMsMTUuMjIsMi4wNjVsLTIuMDMsMS44NTJjLS45NDctLjQyNS0yLjM5Ny0uODc1LTMuNDI1LS43MDgsMi4xMjYsMy42LTIuMTgsMi41ODUtMy41ODUsNC40MjVBNC4yNTgsNC4yNTgsMCwwLDEsNy43LDEyLjM1M2EzLjUzNCwzLjUzNCwwLDAsMSwxLjMsLjkzYy43MDUtLjM3LDEuNDU1LS45NDcsMi40MjUtMS42NzVDOS45NDUsOS43NzUsMTEuNjgsOS4wOTUsMTIsOC42MjVoMS41VjEuNWgtM2MuMDgtLjg1NS0uMjUtMS42MjUtLjQtMi4xNzVsLS4yNS0uMTI1TDMuMTI1LC41QTEwLjk2NSwxMC45NjUsMCwwLDEsNS41LDIuNjI1QzYuOTIsMi41LDUuNzA1LDQuMTI1LDQuNTcsNS41QzQuMjUzLDUuODgsMi45NjUsNi42MzksMi45MDUsNy41QzIuODQsOC4yODUsMi45NTgsOC44MjksMy4wNSw5LjM1QzEuNjQyLDEwLjQsLjUxNSwxMS4xMjUsMS41LDEyLjg3NUMuOTMsMTMuMjUsMS41NiwxMy41OSwxLjUsMTQuMzc1Yy0uMTMyLDMuMDQtMS4zNTYsNS40MjUtMi4xMjUsNy4wNDYtLjg4LDEuODYtLjQxLDUuNTE1LDEuMjEsNi42OTVsMS42NDUsMS41NzVjMS40NDUuMjI1LDMuMjI1LS4xLDUuNS40TDEwLjUzNSwxOHM0LjEzOC0xLjExNSw1LjM3NS0uMTIxYzEuMjM3Ljk5NCwxLjUyNSwyLjAyNSwxLjM3NSw0LjE2NUw4LjY4MSwxNy40OTRDMTIuMjUsMTYuNjE2LDEyLjUzOCwxOS41NzUsMTEuNzUsMjAuMTg3QzExLjkxNywyMC45NDYsMTIuODc1LDE5LjYyNSwxMy41LDE5LjM2NWwxLjYyNSwxLjQ2QzE3Ljk2LDIwLjg4NywxNy43MjMsMjQuMDcsMjEuNzkyLDI0LjgyNWM0LjA2OS40NTUsNS41NCw1LjUzNSw2LjQ1LDEwLjA1TDkuNTYyLDI4LjU5NEExNS41LDE1LjUsMCwwLDAsOS42MTQsMjIuMzlBMTAuODYsMTAuODYsMCwwLDAsOSwxOS43NzVjLS42MTUtMS4wNjMtMS4yOTUtMS43NDgtMS42NzUtMi41MTZDLjA0OSwxNi42ODQsMi40ODcsMTUuMDksNC41LDE0LjU2N2MzLjQ3NS0uNTI0LDYuNTQtMS4xMjMsNy42NzUtMS43NUwxOCwxMS4xNzVDMTcuNjIsOC4xMjUsMTYuNzUsNy41LDE0Ljk4LDcuMjU1LDE0LjAxNSw3LjQyNSwxMi40NjUsNy42MjMsMTAuNSw3LjU1Yy0xLjI0My0uMjItMi41MTctLjU1Ni0zLjQ2NS0uNjQzQzQuMDUsNi40NzMsMS43MzEsNC4wNzUsMS41LDIuMTI1LDEuNCw1LjQxLDEuNzY1LDYuOTYsMS41LDcuOTdhNi40Myw2LjQzLDAsMCwxLTIuMjUuNWwzLjczLjk5NUMtLjgyNSwxNC43MTUsMS42LDExLjk4NSwzLjcxNSwxMC43MUM2LjA2LDEwLjIxLDkuMiwyLDE2LjI1LjVWMkEzLjI3NywzLjI3NywwLDAsMSwxOCwyLjYyNWEuMjUsLjI1LDAsMCwxLC41LDB2MTVhLjI1LjI1LDAsMCwxLS41LDBWMjYuMDc1TDEuNSw2Ljk3NVYxLjVMNy43MjUuMDc1Yy0xLjMxNS0uNDktMi4xNzUtLjk1NS0yLjI1LS43NXoiIGZpbGw9IiNmZjAwMDAiLz48L3N2Zz4="); }
+        .graphic-4 { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgiIGhlaWdodD0iMTA4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjx0aXRsZT5tdXNpYyBpY29uPC90aXRsZT48cGF0aCBkPSJNNi42MTgsMjAuNjQ3QTcuNTM1LDcuNTM1LDAsMCwxLDYuNDQ3LDE3LjlDLTMuOTQsMTIuMTMyLDQuMDUsNy42MjUsNC4wNSw3LjYyNVMxNSwxLjEzNSwxOS41LDYuODU1Yy43Mi0xLjMyNywyLjItMy4xNDQsMy4wNjUtNC4wMDZDLjU1LDUtLTIuMjEzLDkuMjg3LDMuMywxMi4xMDVsMy44NCw0LjI4M2EuMDI1LjAyNSwwLDAsMSwuMTUsMGwxLjUtMS43MTdsLjk0NS0uODIzTDEuNSwxMy4zNjlhMy4wOTEsMy4wOTEsMCwwLDEtMS4zMzUtMS4xNTRBNC40NDksNC40NDksMCwwLDEsLjkxLDguMTY3QzIuNCw3LjMxLDcuNTMsMS41LDEyLDEuNWEzLjMsMy4zLDAsMCwxLDMtLjEyNUEyLjcyOSwyLjcyOSwwLDAsMSwxOCwuNTgyLDMuMTUyLDMuMTUyLDAsMCwxLDE1LjkxMyw2LjAxMkMxNC44ODgsNi42LDEyLjI0OSwxLjYzMiw4Ljg1NCwxLjYzMkg1LjM5OEMzLjcsLjYzNywxLjUsMi42OTQuNzUsNC41QzEuMyw0LjUsMS44OTUsMy42ODUsMi4yNSwzLjY4NWEyLjYyNSwyLjYyNSwwLDAsMSwxLjUtLjEyNUE3LjcxLDcuNzEsMCwwLDEsNC41LDIuNzVhMS41LDEuNSwwLDAsMSwyLjI1LDkuMzc1Yy43NzUtMS4xMDUuNjctMy4xMjUsLjQ3LTQuMjVjLS4xMjUtLjY4LS4yOTgtMS4yODQtLjM1NC0xLjU1NGEuMDI3LjAyNywwLDAsMC0uMDE4LS4wNzVjLS42NzUtLjY2Mi0uNDktMS41MzgtLjM0Mi0yLjIwOC43NzQtMy41ODksNS4xNS0yLjg5MSw4LjcyNy0xLjE4OUEzLjczOCwzLjczOCwwLDAsMSwxNy40MDQsNC40MTljLS4wNjctLjc3LS4wOTItMS40OTUtLjI2OC0yLjEzOS0uMTUtLjU0Ni0uNTkzLTEuMTE3LTEuMzY2LTEuMTM1LS45OTQtLjAyMi0xLjU3LDEuOTItMi42MDksMi40NTJhMTQuMDczLDE0LjA3MywwLDAsMS0xLjQ2My40MTRhMTYuNDcxLDE2LjQ3MSwwLDAsMC0xLjM2LDEuMDQ2bC0uMS4wMzVBNy4yMDUsNy4yMDUsMCwwLDAsOS41LDcuNWwtLjI0LjIwMWEyLjg2MiwyLjg2MiwwLDAsMC0yLjY5Mi44NjksMTMuMDU0LDEzLjA1NCwwLDAsMS02LjMyNCwxLjYyNGMtMi4xNDUtLjIxNS0yLjg0LS4yNjktMy41OTgtLjUyOS0uNzU4LS4yNTktMS4zMi0uNDMyLTEuNzU5LS43MTQtLTIuMTU5LS43MDctMy4xNzEtLjM1Mi0zLjU2OSwxLjQ3Ny0uMTgsLjk1Ny0uMTUsMi4xMTgtLjEyNSwzLjI5My4wMjIsLjk4Ny4wNzUsMS45NjkuMTUsMi45NTQuMjgyLDEuNDIzLjg1LDIuODQ3LDEuMTEyLDQuMTQzYy4xNTgsLjc3NS4zMzMsMS4zNzEuNDUsMi4wOTQuMjI1LDEuMzY5LjU4LDIuOTMzLDEuMTI1LDMuNjk0bC0uMTA5LjMyMWMtLjk1LTIuNDMzLTEuNzc3LTQuODQtMi4zNDYtNy42NzItLjkzNS00LjY2NC0uMTM5LTEwLjk3NiwxLjY2Ny0xMy4zNTFhMS42MTQsMS42MTQsMCwwLDAsLjUtLjc2MS45NTMsLjk1MywwLDAsMC0uNDg3LTEuMjE0TDMuMjI1LDEuMTI1eiIgZmlsbD0iIzAwOWMzYTAiLz48L3N2Zz4="); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Generador de Ideas de Robótica</h1>
+    <p>¡Elige un problema para resolver con tu prototipo WeDo o EV3!</p>
+
+    <div class="category">
+        <div class="graphic graphic-1"></div>
+        <div class="category-content">
+            <h2>Medio Ambiente y Sustentabilidad ♻️</h2>
+            <div class="idea">
+                <strong>Problemática:</strong> ¿Cómo podemos ayudar a mantener limpios los océanos y ríos de los plásticos y basura?
+                <br>
+                <strong>Posible prototipo:</strong> Un robot que recoja o clasifique desechos.
+            </div>
+        </div>
+    </div>
+
+    <div class="category">
+        <div class="graphic graphic-2"></div>
+        <div class="category-content">
+            <h2>Hogar y Vida Cotidiana 🏠</h2>
+            <div class="idea">
+                <strong>Problemática:</strong> Las personas mayores tienen dificultad para alcanzar objetos en lugares altos. ¿Cómo podría un robot ayudarles?
+                <br>
+                <strong>Posible prototipo:</strong> Un brazo robótico que agarre y desplace objetos.
+            </div>
+        </div>
+    </div>
+
+    <div class="category">
+        <div class="graphic graphic-3"></div>
+        <div class="category-content">
+            <h2>Seguridad y Emergencias 🚨</h2>
+            <div class="idea">
+                <strong>Problemática:</strong> ¿Cómo podríamos alertar a las personas sobre un incendio o un terremoto de forma rápida y eficiente?
+                <br>
+                <strong>Posible prototipo:</strong> Un sistema de alarma que detecte movimiento o temperatura.
+            </div>
+        </div>
+    </div>
+
+    <div class="category">
+        <div class="graphic graphic-4"></div>
+        <div class="category-content">
+            <h2>Entretenimiento y Creatividad 🤖</h2>
+            <div class="idea">
+                <strong>Problemática:</strong> ¿Cómo podemos crear juguetes que sean más interactivos y respondan a las acciones de los niños?
+                <br>
+                <strong>Posible prototipo:</strong> Un animal robótico que cambie de color o emita sonidos.
+            </div>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>
