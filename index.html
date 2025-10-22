@@ -1,648 +1,376 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Registro de Incidencias</title>
-  <!-- Enlace a los estilos de Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Enlace a las librerías jsPDF y jsPDF-autoTable para la exportación -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
-  
-  <script type="module">
-    // Importaciones de React
-    import { createElement as r, useState, useMemo, useRef, useEffect, Fragment } from 'https://esm.sh/react@18.2.0';
-    import { createRoot as d } from 'https://esm.sh/react-dom@18.2.0/client';
-    import { PlusCircle, Search, Trash2, FileText, Loader2, XCircle, Edit, ServerCrash } from 'https://esm.sh/lucide-react@0.292.0';
-
-    // Importaciones de Firebase (URLs de CDN)
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-    import { getFirestore, collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-    // Habilitar logs de depuración para Firestore (útil para ver errores de permiso)
-    setLogLevel('debug');
-    
-    // CONFIGURACIÓN GLOBAL DE FIREBASE
-    // La configuración de Firebase se inyecta en el entorno
-    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-
-    // Inicializar Firebase
-    let app, auth, db;
-    if (Object.keys(firebaseConfig).length > 0) {
-      app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
-      db = getFirestore(app);
-    } else {
-      console.error("Firebase config no está disponible o está vacía.");
-    }
-
-    // Componente principal de React
-    const App = () => {
-      // Estado para guardar los datos del formulario actual
-      const [formData, setFormData] = useState({
-        fecha: new Date().toISOString().slice(0, 10), // Fecha actual por defecto
-        nivel: 'PRIMARIA 1A', 
-        tipo: 'LIBRO', 
-        incidencias: '',
-      });
-    
-      // Estado para guardar todas las entradas de la tabla
-      const [entries, setEntries] = useState([]);
-      
-      // Estado para la barra de búsqueda
-      const [searchQuery, setSearchQuery] = useState('');
-      
-      // Estado para mostrar mensajes de validación
-      const [validationError, setValidationError] = useState('');
-      
-      // Estado para el indicador de carga del PDF
-      const [isExporting, setIsExporting] = useState(false);
-      const [exportError, setExportError] = useState('');
-
-      // Estado para el indicador de carga/conexión
-      const [isLoading, setIsLoading] = useState(true);
-      const [dbError, setDbError] = useState(null);
-      const [userId, setUserId] = useState(null); // ID del usuario autenticado
-
-      // Estado para controlar el modo de edición
-      const [editingEntryId, setEditingEntryId] = useState(null);
-
-      // --- RUTA SIMPLIFICADA DE LA COLECCIÓN ---
-      // Esta ruta debe coincidir con la regla de seguridad simplificada en Firebase: /incidencias/{userId}/registros
-      const getCollectionPath = (uid) => `incidencias/${uid}/registros`;
-
-      // --- 1. CONFIGURACIÓN Y AUTENTICACIÓN DE FIREBASE ---
-      useEffect(() => {
-        if (!db) {
-            setDbError("Error: Firebase no inicializado. Verifica la configuración.");
-            setIsLoading(false);
-            return;
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recuerdos Familiares</title>
+    <!-- Carga de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configuración de Fuentes -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f9;
         }
-
-        const setupAuth = async () => {
-            try {
-                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                
-                if (token) {
-                    await signInWithCustomToken(auth, token);
-                } else {
-                    // Usar signInAnonymously si no hay token de autenticación personalizado
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Error en la autenticación de Firebase:", error);
-                setDbError("Fallo en la autenticación. Intenta recargar la página.");
-            }
-        };
-
-        const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                // Si la autenticación es exitosa, guardamos el UID
-                setUserId(user.uid);
-            } else {
-                setUserId(null);
-            }
-        });
-
-        setupAuth();
-        return () => unsubscribeAuth(); 
-      }, []);
-
-      // --- 2. ESCUCHA DE DATOS EN TIEMPO REAL (onSnapshot) ---
-      useEffect(() => {
-        if (!db || !userId) {
-          if (!db) setDbError("Error de conexión a Firestore.");
-          // No iniciar la escucha hasta tener el userId
-          return;
+        .scroll-container {
+            max-height: 80vh;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #888 #f7f7f9;
         }
-
-        const path = getCollectionPath(userId);
-        // Creamos una referencia a la colección de registros del usuario
-        const userRecordsCollection = collection(db, path);
-        // Ordenamos por fecha de forma descendente
-        const q = query(userRecordsCollection, orderBy("fecha", "desc"));
-
-        // onSnapshot escucha los cambios en tiempo real
-        const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
-            const fetchedEntries = [];
-            snapshot.forEach((doc) => {
-                const data = doc.data();
-                fetchedEntries.push({
-                    id: doc.id,
-                    ...data,
-                    fecha: data.fecha, 
-                });
-            });
-            setEntries(fetchedEntries);
-            setIsLoading(false);
-            setDbError(null); 
-        }, (error) => {
-            console.error("Error al obtener los datos de Firestore (Probablemente PERMISSION DENIED):", error);
-            // Mensaje específico para ayudar a depurar reglas de seguridad
-            setDbError("Error al cargar los datos. Verifica tus reglas de seguridad en Firebase y la ruta de la colección.");
-            setIsLoading(false);
-        });
-
-        return () => unsubscribeSnapshot();
-      }, [db, userId]); 
-
-      // Función para formatear el texto: la primera letra de cada oración en mayúscula
-      const formatIncidenciaText = (text) => {
-        const lowercased = text.toLowerCase();
-        const sentences = lowercased.split('. ');
-        
-        const formattedSentences = sentences.map(sentence => {
-          if (sentence.length > 0) {
-            return sentence.charAt(0).toUpperCase() + sentence.slice(1);
-          }
-          return sentence;
-        });
-        
-        return formattedSentences.join('. ');
-      };
-
-
-      // Maneja los cambios en los campos del formulario
-      const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData((prevData) => ({ ...prevData, [name]: value }));
-      };
-      
-      // Maneja el envío del formulario para agregar una nueva entrada
-      const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!formData.incidencias) {
-          setValidationError('Por favor, ingresa el campo de incidencias.');
-          return;
+        .scroll-container::-webkit-scrollbar {
+            width: 8px;
         }
-        setValidationError(''); 
-
-        if (editingEntryId) {
-          handleUpdate();
-          return;
+        .scroll-container::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 10px;
         }
-
-        if (!userId) {
-          setDbError("Error: Usuario no autenticado. No se puede guardar.");
-          return;
-        }
-
-        setIsLoading(true);
-        const formattedIncidencia = formatIncidenciaText(formData.incidencias);
-        
-        try {
-          await addDoc(collection(db, getCollectionPath(userId)), {
-            fecha: formData.fecha,
-            nivel: formData.nivel,
-            tipo: formData.tipo,
-            incidencias: formattedIncidencia,
-            timestamp: new Date().toISOString() 
-          });
-
-          // Reinicia el formulario
-          setFormData({
-            fecha: new Date().toISOString().slice(0, 10),
-            nivel: 'PRIMARIA 1A',
-            tipo: 'LIBRO',
-            incidencias: '',
-          });
-
-        } catch (error) {
-          console.error("Error al agregar documento:", error);
-          setDbError("Fallo al guardar la incidencia en la nube.");
-        } finally {
-          setIsLoading(false);
-        }
-      };
-
-      // Función para actualizar un registro existente
-      const handleUpdate = async () => {
-        if (!editingEntryId || !userId) return;
-
-        setIsLoading(true);
-        const formattedIncidencia = formatIncidenciaText(formData.incidencias);
-
-        try {
-          const docRef = doc(db, getCollectionPath(userId), editingEntryId);
-          await updateDoc(docRef, {
-            fecha: formData.fecha,
-            nivel: formData.nivel,
-            tipo: formData.tipo,
-            incidencias: formattedIncidencia,
-          });
-
-          // Finaliza el modo de edición y limpia el formulario
-          setEditingEntryId(null);
-          setFormData({
-            fecha: new Date().toISOString().slice(0, 10),
-            nivel: 'PRIMARIA 1A',
-            tipo: 'LIBRO',
-            incidencias: '',
-          });
-
-        } catch (error) {
-          console.error("Error al actualizar documento:", error);
-          setDbError("Fallo al actualizar la incidencia en la nube.");
-        } finally {
-          setIsLoading(false);
-        }
-      };
-
-      // Inicia el modo de edición para un registro
-      const handleEdit = (entry) => {
-        setEditingEntryId(entry.id);
-        setFormData({
-          fecha: entry.fecha,
-          nivel: entry.nivel,
-          tipo: entry.tipo,
-          incidencias: entry.incidencias
-        });
-        setValidationError('');
-      };
-
-      // Cancela el modo de edición
-      const handleCancelEdit = () => {
-        setEditingEntryId(null);
-        setFormData({
-          fecha: new Date().toISOString().slice(0, 10),
-          nivel: 'PRIMARIA 1A',
-          tipo: 'LIBRO',
-          incidencias: '',
-        });
-        setValidationError('');
-      };
-      
-      // Filtra las entradas de la tabla basadas en el texto de búsqueda
-      const filteredEntries = useMemo(() => {
-        if (!searchQuery) {
-          return entries;
-        }
-        const lowercasedQuery = searchQuery.toLowerCase();
-        return entries.filter(entry =>
-          entry.fecha.includes(lowercasedQuery) ||
-          entry.nivel.toLowerCase().includes(lowercasedQuery) ||
-          entry.tipo.toLowerCase().includes(lowercasedQuery) ||
-          entry.incidencias.toLowerCase().includes(lowercasedQuery)
-        );
-      }, [entries, searchQuery]);
-      
-      // Maneja la eliminación de una entrada
-      const handleDelete = async (id) => {
-        if (!userId) return;
-        
-        setIsLoading(true);
-        try {
-          await deleteDoc(doc(db, getCollectionPath(userId), id));
-          if (editingEntryId === id) {
-             handleCancelEdit();
-          }
-        } catch (error) {
-          console.error("Error al eliminar documento:", error);
-          setDbError("Fallo al eliminar la incidencia en la nube.");
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      
-      // Función para exportar la tabla a PDF usando jsPDF
-      const handleExportPdf = () => {
-        if (typeof window.jspdf === 'undefined') {
-          console.error("Librería jsPDF no cargada.");
-          setExportError('Error: La librería de exportación a PDF no se ha cargado correctamente.');
-          return;
-        }
-        
-        if (filteredEntries.length === 0) {
-          setExportError('No hay registros filtrados para exportar a PDF.');
-          return;
-        }
-        
-        setIsExporting(true);
-        setExportError('');
-
-        try {
-          const { jsPDF } = window.jspdf;
-          const doc = new jsPDF();
-          
-          doc.setFontSize(18);
-          doc.text("Registro de Incidencias", 14, 20);
-
-          const headers = [["Fecha", "Nivel", "Tipo", "Incidencias"]];
-          const data = filteredEntries.map(entry => [entry.fecha, entry.nivel, entry.tipo, entry.incidencias]);
-          
-          doc.autoTable({
-            startY: 30, 
-            head: headers,
-            body: data,
-            theme: 'striped',
-            headStyles: { fillColor: [242, 242, 242], textColor: [0, 0, 0] },
-            styles: {
-              font: "Helvetica",
-              fontSize: 10,
-              cellPadding: 3,
-              overflow: 'linebreak',
-              valign: 'middle'
-            },
-            columnStyles: {
-              3: { cellWidth: 80 } 
-            }
-          });
-
-          doc.save(`registros_incidencias_${new Date().toISOString().slice(0, 10)}.pdf`);
-          
-          setIsExporting(false);
-        } catch (error) {
-          console.error("Error al exportar a PDF:", error);
-          setExportError('Ocurrió un error al generar el PDF. Inténtalo de nuevo.');
-          setIsExporting(false);
-        }
-      };
-      
-      // Función para establecer el texto de incidencias con un valor predefinido
-      const handlePredefinedIncidencia = (text) => {
-        setFormData(prevData => ({ ...prevData, incidencias: text }));
-      };
-      
-      // Componente JSX principal
-      return (
-        r('div', { className: 'min-h-screen bg-slate-50 p-4 sm:p-8 font-sans' },
-          r('div', { className: 'max-w-4xl mx-auto space-y-8' },
-            // Título, Descripción y UID
-            r('div', { className: 'text-center' },
-              r('h1', { className: 'text-4xl sm:text-5xl font-bold text-gray-800 tracking-tight mb-2' }, 'Registro de Incidencias'),
-              r('p', { className: 'text-gray-500 text-lg mb-4' }, 'Introduce y gestiona las incidencias por día.'),
-              userId && r('p', { className: 'text-xs text-gray-400' }, 
-                  r('span', { className: 'font-semibold text-gray-600' }, 'ID de Usuario: '), userId
-              )
-            ),
-            
-            // Mensajes de Error de la base de datos
-            dbError && r('div', { className: 'bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative shadow-md', role: 'alert' },
-                r('p', { className: 'font-bold' }, 'Error de Conexión:'),
-                r('p', { className: 'text-sm' }, dbError),
-                r('p', { className: 'text-xs mt-1' }, 'Nota: Esto puede deberse a la configuración de tus reglas de seguridad en Firebase.')
-            ),
-
-            // Sección de formulario
-            r('div', { className: 'bg-white rounded-2xl shadow-xl p-6 sm:p-8 transition-all duration-300 hover:shadow-2xl' },
-              r('h2', { className: 'text-2xl font-semibold text-gray-700 mb-6' },
-                editingEntryId ? 'Editar Registro' : 'Nuevo Registro'
-              ),
-              r('form', { onSubmit: handleSubmit, className: 'grid grid-cols-1 md:grid-cols-2 gap-6' },
-                // Campo Fecha
-                r('div', null,
-                  r('label', { htmlFor: 'fecha', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Fecha'),
-                  r('input', {
-                    type: 'date',
-                    id: 'fecha',
-                    name: 'fecha',
-                    value: formData.fecha,
-                    onChange: handleChange,
-                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                    required: true,
-                    disabled: isLoading
-                  })
-                ),
-                
-                // Campo Nivel
-                r('div', null,
-                  r('label', { htmlFor: 'nivel', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Nivel'),
-                  r('select', {
-                    id: 'nivel',
-                    name: 'nivel',
-                    value: formData.nivel,
-                    onChange: handleChange,
-                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                    required: true,
-                    disabled: isLoading
-                  },
-                    r('option', { value: 'PRIMARIA 1A' }, 'PRIMARIA 1A'),
-                    r('option', { value: 'PRIMARIA 1B' }, 'PRIMARIA 1B'),
-                    r('option', { value: 'PRIMARIA 1C' }, 'PRIMARIA 1C'),
-                    r('option', { value: 'PRIMARIA 2E' }, 'PRIMARIA 2E'),
-                    r('option', { value: 'PRIMARIA 2F' }, 'PRIMARIA 2F'),
-                    r('option', { value: 'PRIMARIA 2G' }, 'PRIMARIA 2G'),
-                    r('option', { value: 'PRIMARIA 3H' }, 'PRIMARIA 3H'),
-                    r('option', { value: 'PRIMARIA 3I' }, 'PRIMARIA 3I'),
-                    r('option', { value: 'PRIMARIA 3J' }, 'PRIMARIA 3J'),
-                    r('option', { value: 'PRIMARIA 4K' }, 'PRIMARIA 4K'),
-                    r('option', { value: 'PRIMARIA 4L' }, 'PRIMARIA 4L'),
-                    r('option', { value: 'PRIMARIA 4M' }, 'PRIMARIA 4M'),
-                    r('option', { value: 'PRIMARIA 5N' }, 'PRIMARIA 5N'),
-                    r('option', { value: 'PRIMARIA 5O' }, 'PRIMARIA 5O'),
-                    r('option', { value: 'PRIMARIA 5P' }, 'PRIMARIA 5P'),
-                    r('option', { value: 'PRIMARIA 6Q' }, 'PRIMARIA 6Q'),
-                    r('option', { value: 'PRIMARIA 6R' }, 'PRIMARIA 6R'),
-                    r('option', { value: 'PRIMARIA 6S' }, 'PRIMARIA 6S'),
-                    r('option', { value: 'SECUNDARIA 1A' }, 'SECUNDARIA 1A'),
-                    r('option', { value: 'SECUNDARIA 1B' }, 'SECUNDARIA 1B'),
-                    r('option', { value: 'SECUNDARIA 1C' }, 'SECUNDARIA 1C'),
-                    r('option', { value: 'SECUNDARIA 2D' }, 'SECUNDARIA 2D'),
-                    r('option', { value: 'SECUNDARIA 2E' }, 'SECUNDARIA 2E'),
-                    r('option', { value: 'SECUNDARIA 2F' }, 'SECUNDARIA 2F'),
-                    r('option', { value: 'SECUNDARIA 3G' }, 'SECUNDARIA 3G'),
-                    r('option', { value: 'SECUNDARIA 3H' }, 'SECUNDARIA 3H'),
-                    r('option', { value: 'SECUNDARIA 3I' }, 'SECUNDARIA 3I')
-                  )
-                ),
-                
-                // Campo Tipo
-                r('div', null,
-                  r('label', { htmlFor: 'tipo', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Tipo'),
-                  r('select', {
-                    id: 'tipo',
-                    name: 'tipo',
-                    value: formData.tipo,
-                    onChange: handleChange,
-                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                    required: true,
-                    disabled: isLoading
-                  },
-                    r('option', { value: 'LIBRO' }, 'LIBRO'),
-                    r('option', { value: 'TALLER' }, 'TALLER')
-                  )
-                ),
-                
-                // Espacio vacío para completar la parrilla en móvil
-                r('div', { className: 'hidden md:block' }),
-
-                // Campo Incidencias
-                r('div', { className: 'md:col-span-2' },
-                  r('label', { htmlFor: 'incidencias', className: 'block text-sm font-medium text-gray-600 mb-1' }, 'Incidencias'),
-                  r('textarea', {
-                    id: 'incidencias',
-                    name: 'incidencias',
-                    value: formData.incidencias,
-                    onChange: handleChange,
-                    rows: '4',
-                    className: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none',
-                    placeholder: 'Escribe aquí las incidencias...',
-                    required: true,
-                    disabled: isLoading
-                  }),
-                  // Botones de recomendaciones para incidencias
-                  r('div', { className: 'flex flex-wrap gap-2 mt-2' },
-                    r('button', {
-                      type: 'button',
-                      onClick: () => handlePredefinedIncidencia('SIN INCIDENCIAS'),
-                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors',
-                      disabled: isLoading
-                    }, 'SIN INCIDENCIAS'),
-                    r('button', {
-                      type: 'button',
-                      onClick: () => handlePredefinedIncidencia('LAS CLASES SE DESARROLLÓ EN EL AULA'),
-                      className: 'px-3 py-1 bg-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors',
-                      disabled: isLoading
-                    }, 'LAS CLASES SE DESARROLLÓ EN EL AULA')
-                  ),
-                  validationError && r('p', { className: 'mt-1 text-sm text-red-500' }, validationError)
-                ),
-                
-                // Botones de envío/actualización
-                r('div', { className: 'md:col-span-2 flex justify-end gap-4' },
-                  editingEntryId && (
-                    r('button', {
-                      type: 'button',
-                      onClick: handleCancelEdit,
-                      className: 'flex items-center gap-2 px-6 py-3 bg-gray-500 text-white font-semibold rounded-full shadow-lg hover:bg-gray-600 focus:outline-none focus:ring-4 focus:ring-gray-300 transition-all duration-200 transform hover:scale-105',
-                      disabled: isLoading
-                    },
-                      r(XCircle, { size: 20 }),
-                      'Cancelar'
-                    )
-                  ),
-                  r('button', {
-                    type: 'submit',
-                    className: `flex items-center gap-2 px-6 py-3 font-semibold rounded-full shadow-lg focus:outline-none focus:ring-4 transition-all duration-200 transform hover:scale-105 ${
-                      editingEntryId
-                        ? 'bg-orange-500 text-white hover:bg-orange-600 focus:ring-orange-300'
-                        : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-300'
-                    }`,
-                    disabled: isLoading || dbError 
-                  },
-                    isLoading && r('svg', { className: 'animate-spin h-5 w-5 text-white', xmlns: 'http://www.w3.org/2000/svg', fill: 'none', viewBox: '0 0 24 24' },
-                        r('circle', { className: 'opacity-25', cx: '12', cy: '12', r: '10', stroke: 'currentColor', strokeWidth: '4' }),
-                        r('path', { className: 'opacity-75', fill: 'currentColor', d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z' })
-                    ),
-                    editingEntryId
-                      ? r(Edit, { size: 20, className: isLoading ? 'hidden' : '' })
-                      : r(PlusCircle, { size: 20, className: isLoading ? 'hidden' : '' }),
-                    editingEntryId ? 'Guardar Cambios' : 'Agregar Incidencia'
-                  )
-                )
-              )
-            ),
-            
-            // Sección de búsqueda y tabla de resultados
-            r('div', { className: 'bg-white rounded-2xl shadow-xl p-6 sm:p-8 transition-all duration-300 hover:shadow-2xl' },
-              r('div', { className: 'flex flex-col sm:flex-row justify-between items-center mb-6' },
-                r('h2', { className: 'text-2xl font-semibold text-gray-700 mb-4 sm:mb-0' }, 'Registros guardados'),
-                r('div', { className: 'flex items-center gap-4 w-full sm:w-auto' },
-                  r('div', { className: 'relative w-full' },
-                    r('input', {
-                      type: 'text',
-                      placeholder: 'Buscar por fecha, nivel o incidencia...',
-                      value: searchQuery,
-                      onChange: (e) => setSearchQuery(e.target.value),
-                      className: 'w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors',
-                      disabled: isLoading
-                    }),
-                    r(Search, { className: 'absolute left-3 top-1/2 -translate-y-1/2 text-gray-400', size: 20 })
-                  ),
-                  r('button', {
-                    onClick: handleExportPdf,
-                    disabled: isExporting || isLoading || filteredEntries.length === 0,
-                    className: `flex items-center gap-2 px-4 py-2 font-semibold rounded-lg shadow-md transition-all duration-200 ${
-                      isExporting || isLoading || filteredEntries.length === 0
-                        ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                        : 'bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-300'
-                    }`
-                  },
-                    isExporting
-                      ? r('svg', { className: 'animate-spin h-5 w-5 text-white', xmlns: 'http://www.w3.org/2000/svg', fill: 'none', viewBox: '0 0 24 24' },
-                          r('circle', { className: 'opacity-25', cx: '12', cy: '12', r: '10', stroke: 'currentColor', strokeWidth: '4' }),
-                          r('path', { className: 'opacity-75', fill: 'currentColor', d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z' })
-                        )
-                      : r(Fragment, null,
-                          r(FileText, { size: 20 }),
-                          `Exportar (${filteredEntries.length})`
-                        )
-                  )
-                )
-              ),
-              
-              // Muestra el mensaje de error de exportación
-              exportError && r('div', { className: 'mt-4 text-center text-red-500 flex items-center justify-center gap-2' }, 
-                r(XCircle, { size: 20 }),
-                exportError
-              ),
-
-              // Tabla de resultados
-              isLoading ? (
-                r('div', { className: 'flex items-center justify-center p-8 text-gray-500' },
-                  r(Loader2, { className: 'animate-spin mr-2', size: 24 }),
-                  'Cargando registros...'
-                )
-              ) : (
-                r('div', { className: 'overflow-x-auto rounded-lg border border-gray-200' },
-                  filteredEntries.length > 0 ? (
-                    r('table', { className: 'min-w-full divide-y divide-gray-200' },
-                      r('thead', { className: 'bg-slate-100' },
-                        r('tr', null,
-                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Fecha'),
-                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Nivel'),
-                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Tipo'),
-                          r('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Incidencias'),
-                          r('th', { scope: 'col', className: 'px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Acción')
-                        )
-                      ),
-                      r('tbody', { className: 'bg-white divide-y divide-gray-200' },
-                        filteredEntries.map((entry) => (
-                          r('tr', { key: entry.id, className: 'hover:bg-slate-50 transition-colors' },
-                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, entry.fecha),
-                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-600' }, entry.nivel),
-                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-600' }, entry.tipo),
-                            r('td', { className: 'px-6 py-4 text-sm text-gray-600 max-w-xs md:max-w-md overflow-hidden text-ellipsis' }, entry.incidencias),
-                            r('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex items-center justify-end gap-2' },
-                              r('button', {
-                                onClick: () => handleEdit(entry),
-                                className: 'text-blue-500 hover:text-blue-700 transition-colors focus:outline-none',
-                                disabled: isLoading
-                              },
-                                r(Edit, { size: 18 })
-                              ),
-                              r('button', {
-                                onClick: () => handleDelete(entry.id),
-                                className: 'text-red-500 hover:text-red-700 transition-colors focus:outline-none',
-                                disabled: isLoading
-                              },
-                                r(Trash2, { size: 18 })
-                              )
-                            )
-                          )
-                        ))
-                      )
-                    )
-                  ) : (
-                    r('p', { className: 'text-center text-gray-500 p-8' }, 'No hay registros para mostrar. ¡Agrega una nueva incidencia!')
-                  )
-                )
-              )
-            )
-          )
-        )
-      );
-    };
-
-    // Renderiza la aplicación
-    const root = d(document.getElementById('root'));
-    root.render(r(App));
-  </script>
+    </style>
 </head>
 <body>
-  <div id="root"></div>
+
+    <div id="app" class="min-h-screen p-4 md:p-8">
+        <!-- Encabezado y Barra de Navegación -->
+        <header class="mb-8 border-b border-indigo-200 pb-4">
+            <h1 class="text-4xl font-extrabold text-indigo-800 tracking-tight text-center">
+                Álbum de Recuerdos Familiar
+            </h1>
+            <p class="text-center text-indigo-500 mt-2">Nuestra historia, un recuerdo a la vez.</p>
+        </header>
+
+        <!-- Contenedor Principal (Flexbox) -->
+        <div class="flex flex-col lg:flex-row gap-8">
+            
+            <!-- Panel de Subida (Columna Izquierda) -->
+            <aside class="lg:w-1/3 p-6 bg-white rounded-xl shadow-2xl sticky top-8 h-fit">
+                <h2 class="text-2xl font-bold text-indigo-700 mb-4 border-b pb-2">Agregar Nuevo Recuerdo</h2>
+                
+                <div id="auth-info" class="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-sm text-indigo-700">
+                    <!-- ID de usuario se cargará aquí -->
+                    <p>Estado: <span id="auth-status" class="font-semibold">Cargando...</span></p>
+                    <p class="mt-1 break-all">ID Usuario: <span id="user-id-display" class="font-mono text-xs">...</span></p>
+                </div>
+
+                <!-- Formulario de Subida -->
+                <form id="upload-form" class="space-y-4">
+                    <div>
+                        <label for="file-input" class="block text-sm font-medium text-gray-700">Foto o Video</label>
+                        <input type="file" id="file-input" accept="image/*,video/*" required 
+                               class="mt-1 block w-full text-sm text-gray-500
+                               file:mr-4 file:py-2 file:px-4
+                               file:rounded-full file:border-0
+                               file:text-sm file:font-semibold
+                               file:bg-indigo-50 file:text-indigo-700
+                               hover:file:bg-indigo-100">
+                    </div>
+
+                    <div>
+                        <label for="title-input" class="block text-sm font-medium text-gray-700">Título del Recuerdo</label>
+                        <input type="text" id="title-input" required placeholder="Ej: Vacaciones en la playa 2023"
+                               class="mt-1 block w-full border border-gray-300 rounded-lg p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+
+                    <div>
+                        <label for="description-input" class="block text-sm font-medium text-gray-700">Descripción (Opcional)</label>
+                        <textarea id="description-input" rows="3" placeholder="Una breve historia sobre este momento..."
+                                  class="mt-1 block w-full border border-gray-300 rounded-lg p-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"></textarea>
+                    </div>
+
+                    <button type="submit" id="upload-button" disabled
+                            class="w-full py-2 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                        Subir Recuerdo
+                    </button>
+                    <div id="progress-bar" class="w-full bg-gray-200 rounded-full h-2.5 hidden">
+                        <div id="progress-indicator" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p id="message-box" class="text-sm mt-2 text-center"></p>
+                </form>
+            </aside>
+
+            <!-- Galería de Recuerdos (Columna Derecha) -->
+            <main class="lg:w-2/3">
+                <h2 class="text-3xl font-bold text-gray-800 mb-6">Nuestra Galería</h2>
+                
+                <!-- Contenedor de la Galería -->
+                <div id="gallery-container" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 scroll-container p-1">
+                    <!-- Los recuerdos se insertarán aquí dinámicamente -->
+                    <p id="loading-message" class="col-span-full text-center text-gray-500 p-8 text-lg">Cargando recuerdos...</p>
+                </div>
+
+                <div id="no-memories-message" class="hidden col-span-full text-center text-gray-500 p-8 text-lg bg-white rounded-xl shadow-lg mt-6">
+                    Aún no hay recuerdos. ¡Sube el primero para empezar!
+                </div>
+            </main>
+        </div>
+
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, collection, query, orderBy, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Habilitar logs de depuración para Firestore (opcional)
+        setLogLevel('Debug');
+
+        // --- 1. CONFIGURACIÓN INICIAL DE FIREBASE ---
+        let db, auth, storage, userId = null;
+        let isAuthReady = false;
+
+        // Variables globales del entorno (Canvas/Gemini)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        let firebaseConfig;
+        try {
+            firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        } catch (e) {
+            console.error("Error al parsear __firebase_config:", e);
+            firebaseConfig = {};
+        }
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        const galleryContainer = document.getElementById('gallery-container');
+        const loadingMessage = document.getElementById('loading-message');
+        const noMemoriesMessage = document.getElementById('no-memories-message');
+        const uploadForm = document.getElementById('upload-form');
+        const uploadButton = document.getElementById('upload-button');
+        const progressBar = document.getElementById('progress-bar');
+        const progressIndicator = document.getElementById('progress-indicator');
+        const messageBox = document.getElementById('message-box');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const authStatus = document.getElementById('auth-status');
+
+
+        async function initializeFirebase() {
+            try {
+                if (!Object.keys(firebaseConfig).length) {
+                    throw new Error("La configuración de Firebase está vacía. El entorno no ha proporcionado la configuración.");
+                }
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                storage = getStorage(app);
+
+                // --- 2. AUTENTICACIÓN ---
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        authStatus.textContent = "Conectado";
+                        userIdDisplay.textContent = userId;
+                        isAuthReady = true;
+                        uploadButton.disabled = false;
+                        console.log("Usuario autenticado. UID:", userId);
+                        
+                        // Una vez autenticado, inicia la escucha de la base de datos
+                        setupFirestoreListener();
+
+                    } else {
+                        // Intentar iniciar sesión con el token personalizado si está disponible
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            // O iniciar sesión anónimamente
+                            await signInAnonymously(auth);
+                        }
+                        // La llamada a onAuthStateChanged se ejecutará de nuevo con el usuario recién autenticado
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error en la inicialización de Firebase/Auth:", error);
+                messageBox.textContent = `Error: ${error.message}`;
+                authStatus.textContent = "Error de conexión";
+                userIdDisplay.textContent = "N/A";
+                loadingMessage.textContent = "Error al conectar con la base de datos. Verifica la configuración de Firebase.";
+                uploadButton.disabled = true;
+            }
+        }
+
+        // --- 3. LECTURA DE DATOS (Real-Time Listener) ---
+        function setupFirestoreListener() {
+            if (!db || !userId) {
+                console.warn("Firestore o UserId no están listos para la escucha.");
+                return;
+            }
+
+            // Ruta de la colección: /artifacts/{appId}/users/{userId}/family_memories
+            const memoriesCollectionRef = collection(db, 'artifacts', appId, 'users', userId, 'family_memories');
+            
+            // Consulta: obtener todos los documentos, ordenados por fecha de creación (descendente)
+            const q = query(memoriesCollectionRef, orderBy('timestamp', 'desc'));
+
+            onSnapshot(q, (snapshot) => {
+                loadingMessage.classList.add('hidden');
+                galleryContainer.innerHTML = ''; // Limpia la galería
+
+                if (snapshot.empty) {
+                    noMemoriesMessage.classList.remove('hidden');
+                    return;
+                }
+                noMemoriesMessage.classList.add('hidden');
+
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    galleryContainer.appendChild(createMemoryCard(data));
+                });
+                console.log("Datos de Firestore actualizados.");
+            }, (error) => {
+                console.error("Error al escuchar Firestore:", error);
+                messageBox.textContent = `Error de escucha: ${error.message}`;
+                loadingMessage.textContent = "Error al cargar los recuerdos.";
+            });
+        }
+
+        // --- 4. CREACIÓN DE ELEMENTOS DE LA UI (Tarjeta de Recuerdo) ---
+        function createMemoryCard(memory) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl shadow-lg overflow-hidden transform hover:scale-[1.02] transition duration-300 ease-in-out';
+
+            // Contenedor de medios (Imagen o Video)
+            const mediaWrapper = document.createElement('div');
+            mediaWrapper.className = 'w-full h-48 bg-gray-100 flex items-center justify-center overflow-hidden';
+            
+            if (memory.type.startsWith('image')) {
+                const img = document.createElement('img');
+                img.src = memory.url;
+                img.alt = memory.title;
+                img.className = 'object-cover w-full h-full';
+                img.loading = 'lazy';
+                mediaWrapper.appendChild(img);
+            } else if (memory.type.startsWith('video')) {
+                const video = document.createElement('video');
+                video.src = memory.url;
+                video.controls = true;
+                video.muted = true;
+                video.className = 'object-cover w-full h-full';
+                video.title = memory.title;
+                video.setAttribute('aria-label', memory.title);
+                mediaWrapper.appendChild(video);
+            } else {
+                 // Fallback para tipos desconocidos
+                const text = document.createElement('p');
+                text.className = 'text-gray-500 p-4';
+                text.textContent = 'Tipo de archivo no compatible.';
+                mediaWrapper.appendChild(text);
+            }
+
+            // Cuerpo de la Tarjeta (Título y Descripción)
+            const body = document.createElement('div');
+            body.className = 'p-4';
+
+            const title = document.createElement('h3');
+            title.className = 'text-xl font-semibold text-gray-800 truncate';
+            title.textContent = memory.title;
+
+            const description = document.createElement('p');
+            description.className = 'text-sm text-gray-500 mt-1 line-clamp-2';
+            description.textContent = memory.description || 'Sin descripción.';
+
+            const date = document.createElement('p');
+            date.className = 'text-xs text-indigo-400 mt-2';
+            if (memory.timestamp && memory.timestamp.toDate) {
+                date.textContent = memory.timestamp.toDate().toLocaleDateString('es-ES', { 
+                    year: 'numeric', month: 'long', day: 'numeric' 
+                });
+            } else {
+                date.textContent = 'Fecha desconocida';
+            }
+
+
+            body.appendChild(title);
+            body.appendChild(description);
+            body.appendChild(date);
+            
+            card.appendChild(mediaWrapper);
+            card.appendChild(body);
+
+            return card;
+        }
+
+        // --- 5. LÓGICA DE SUBIDA DE ARCHIVOS ---
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!isAuthReady) {
+                messageBox.textContent = "Esperando conexión. Intenta de nuevo en unos segundos.";
+                return;
+            }
+
+            const fileInput = document.getElementById('file-input');
+            const titleInput = document.getElementById('title-input');
+            const descriptionInput = document.getElementById('description-input');
+            
+            const file = fileInput.files[0];
+            const title = titleInput.value.trim();
+            const description = descriptionInput.value.trim();
+            const fileType = file.type;
+
+            if (!file || !title) {
+                messageBox.textContent = "Por favor, selecciona un archivo y añade un título.";
+                return;
+            }
+
+            uploadButton.disabled = true;
+            messageBox.textContent = "Iniciando subida...";
+            progressBar.classList.remove('hidden');
+
+            try {
+                // Generar un nombre de archivo único
+                const storagePath = `family_memories/${userId}/${Date.now()}_${file.name}`;
+                const storageRef = ref(storage, storagePath);
+
+                // Subir archivo a Firebase Storage
+                const uploadTask = uploadBytesResumable(storageRef, file);
+
+                uploadTask.on('state_changed', 
+                    (snapshot) => {
+                        // Manejo del progreso de subida
+                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                        progressIndicator.style.width = `${progress}%`;
+                        messageBox.textContent = `Subiendo: ${progress.toFixed(0)}%`;
+                    }, 
+                    (error) => {
+                        // Manejo de errores
+                        throw new Error(`Error en Storage: ${error.message}`);
+                    }, 
+                    async () => {
+                        // Subida completada: Obtener URL y guardar en Firestore
+                        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+
+                        // Guardar metadatos en Firestore
+                        const memoriesCollectionRef = collection(db, 'artifacts', appId, 'users', userId, 'family_memories');
+                        await addDoc(memoriesCollectionRef, {
+                            title: title,
+                            description: description,
+                            url: downloadURL,
+                            type: fileType,
+                            timestamp: serverTimestamp(),
+                            uploadedBy: userId // Referencia de quién subió
+                        });
+
+                        messageBox.textContent = "¡Recuerdo subido exitosamente!";
+                        // Limpiar formulario
+                        uploadForm.reset();
+                        progressIndicator.style.width = '0%';
+                        setTimeout(() => { progressBar.classList.add('hidden'); }, 1500);
+                    }
+                );
+            } catch (error) {
+                console.error("Error al subir o guardar el recuerdo:", error);
+                messageBox.textContent = `Error fatal: ${error.message}`;
+                progressBar.classList.add('hidden');
+                progressIndicator.style.width = '0%';
+            } finally {
+                uploadButton.disabled = false;
+            }
+        });
+
+        // Iniciar la aplicación
+        initializeFirebase();
+
+    </script>
 </body>
 </html>
